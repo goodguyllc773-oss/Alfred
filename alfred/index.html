@@ -564,25 +564,45 @@
           <h2>Gmail <span class="who">Miles</span></h2>
           <div id="gmailOnly" hidden>
             <p class="sub" id="gmailStatus">Checking…</p>
-            <div class="field"><label>Google Client ID</label><input id="gClientId" placeholder="…apps.googleusercontent.com" autocomplete="off"></div>
-            <div class="field"><label>Google Client secret</label><input id="gClientSecret" type="password" placeholder="GOCSPX-…" autocomplete="off"></div>
-            <div class="inline">
-              <button class="btn sm" id="gSaveCreds">Save</button>
-              <button class="btn primary sm" id="gConnect">Connect Gmail</button>
-              <button class="btn ghost sm danger" id="gDisconnect" hidden>Disconnect</button>
+
+            <div id="gImapBlock">
+              <p class="foot faint" style="margin-bottom:8px"><b>Link with an App Password</b> — the simple way, no Google Cloud project. Turn on 2-Step Verification for your Google account, then <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">create an App Password</a> and paste the 16-character code below. The moment you link it, Miles and Alfred can read your mail.</p>
+              <div class="field"><label>Gmail address</label><input id="gImapUser" type="email" placeholder="you@gmail.com" autocomplete="off"></div>
+              <div class="field"><label>App Password</label><input id="gImapPass" type="password" placeholder="abcd efgh ijkl mnop" autocomplete="off"></div>
+              <button class="btn primary sm" id="gImapConnect">Link Gmail</button>
             </div>
+
+            <details id="gOauthBlock" style="margin-top:14px">
+              <summary class="muted" style="cursor:pointer;font-size:12.5px">Advanced: Google sign-in (OAuth) instead</summary>
+              <div style="margin-top:10px">
+                <div class="field"><label>Google Client ID</label><input id="gClientId" placeholder="…apps.googleusercontent.com" autocomplete="off"></div>
+                <div class="field"><label>Google Client secret</label><input id="gClientSecret" type="password" placeholder="GOCSPX-…" autocomplete="off"></div>
+                <div class="inline">
+                  <button class="btn sm" id="gSaveCreds">Save</button>
+                  <button class="btn sm" id="gConnect">Connect via Google</button>
+                </div>
+              </div>
+            </details>
+
+            <button class="btn ghost sm danger" id="gDisconnect" hidden style="margin-top:12px">Disconnect Gmail</button>
+
             <div class="row" style="margin-top:12px">
-              <div class="field"><label>Search / filter</label><input id="gQuery" placeholder="in:inbox"></div>
-              <div class="field"><label>How many</label><input id="gMax" type="number" min="5" max="100" placeholder="25"></div>
+              <div class="field" id="gQueryField"><label>Search / filter</label><input id="gQuery" placeholder="in:inbox"></div>
+              <div class="field"><label>How many emails</label><input id="gMax" type="number" min="5" max="100" placeholder="25"></div>
             </div>
             <label class="toggle" style="margin-top:6px"><input type="checkbox" id="gAiAlways"> Let Alfred send email text to the AI without asking each time</label>
-            <p class="foot faint" style="margin-top:8px">Sign-in stays on this machine (renewal token encrypted in Windows). Every send, label, or delete asks first.</p>
+            <p class="foot faint" style="margin-top:8px">Credentials stay on this machine, encrypted. Every send, label, or delete asks first.</p>
           </div>
           <p class="sub" id="gmailWebNote">Gmail connects only in the Alfred desktop app. In a browser you can still add or paste emails by hand.</p>
           <hr class="sep">
           <h2>Voice</h2>
-          <label class="toggle"><input type="checkbox" id="setVoice"> Alfred speaks (greeting + replies read aloud)</label>
-          <div class="field" style="margin-top:10px"><label>Browser voice</label>
+          <input type="checkbox" id="setVoice" hidden>
+          <div class="inline" style="margin-bottom:10px">
+            <button class="btn" id="voiceToggle">🔊 Voices on</button>
+            <button class="btn ghost sm" id="voiceStop">Stop talking</button>
+          </div>
+          <p class="foot faint">Turns all spoken output on or off — greeting, Miles/Otto/Ivy read-outs, and Alfred's replies.</p>
+          <div class="field" style="margin-top:10px"><label>Browser voice (used when ElevenLabs isn't set)</label>
             <select id="setBrowserVoice"><option value="">Default</option></select>
           </div>
           <button class="btn sm" id="testVoice">Test voice</button>
@@ -1073,8 +1093,20 @@
   function gmailFix(msg, code) {
     const steps = {
       NO_CREDS: ["Open Settings → Gmail.", "Paste the Client ID and Client secret from your Google Cloud project (APIs & Services → Credentials → your OAuth client).", "Press Save, then Connect Gmail."],
-      NOT_CONNECTED: ["Open Settings → Gmail and press Connect Gmail.", "Approve the permissions in the browser window that opens."],
-      TOKEN_EXPIRED: ["Google signed Alfred out (this happens if the consent screen is still in 'Testing' — tokens last 7 days there).", "In the Google Cloud console → OAuth consent screen → press 'Publish app' / set it to 'In production'.", "Back in Alfred: Settings → Gmail → Connect Gmail again."],
+      NOT_CONNECTED: ["Open Settings → Gmail and link your account — either an App Password (simple) or the advanced Google sign-in.", "Then try again."],
+      TOKEN_EXPIRED: ["Google signed Alfred out (this happens if the consent screen is still in 'Testing' — tokens last 7 days there).", "In the Google Cloud console → OAuth consent screen → press 'Publish app' / set it to 'In production'.", "Back in Alfred: Settings → Gmail → Connect via Google again."],
+      IMAP_AUTH: [
+        "Turn on 2-Step Verification: myaccount.google.com → Security → 2-Step Verification.",
+        "Create an App Password: myaccount.google.com/apppasswords → name it 'Alfred' → copy the 16-character code.",
+        "In Gmail on the web: Settings → See all settings → Forwarding and POP/IMAP → enable IMAP.",
+        "Paste the App Password (not your normal password) into Settings → Gmail and press Link Gmail.",
+      ],
+      IMAP_DEPS: [
+        "IMAP support needs its packages installed.",
+        "Open a terminal in the alfred folder and run:  npm install",
+        "Restart Alfred and link Gmail again.",
+      ],
+      BAD_INPUT: ["Fill in both your Gmail address and the App Password.", "The App Password is 16 characters from myaccount.google.com/apppasswords."],
     };
     fixCard("Gmail: " + (msg || "something went wrong"),
       steps[code] || [
@@ -1136,25 +1168,44 @@
     $("#gQuery").value = settings.gmailQuery || "in:inbox";
     $("#gMax").value = Number(settings.gmailMax) || 25;
     $("#gAiAlways").checked = aiAlways;
-    const st = await NATIVE.gmail.status();
+    let st;
+    try { st = await NATIVE.gmail.status(); } catch (e) { st = { connected: false }; }
     gmailConnected = !!st.connected;
+    const setup = !st.connected;
+    $("#gImapBlock").hidden = !setup;
+    $("#gOauthBlock").hidden = !setup;
+    $("#gDisconnect").hidden = setup;
+    $("#gmailSyncBtn").hidden = setup;
+    $("#gmailBar").hidden = setup;
+    $("#gQueryField").hidden = st.method === "imap";
     $("#gmailStatus").textContent = st.connected
-      ? "Connected as " + st.email
-      : st.expired ? "Signed out by Google — reconnect below."
-      : st.creds ? "Credentials saved. Press Connect Gmail."
-      : "Not set up. Add your Google Client ID + secret below.";
-    $("#gConnect").hidden = st.connected;
-    $("#gDisconnect").hidden = !st.connected;
-    $("#gmailSyncBtn").hidden = !st.connected;
-    $("#gmailBar").hidden = !st.connected;
+      ? (st.method === "imap" ? "Linked to " + st.email + " over IMAP." : "Signed in as " + st.email + " (Google OAuth).")
+      : st.expired ? "Google signed Alfred out — link again below."
+      : st.creds ? "OAuth credentials saved. Open the advanced section and press Connect via Google."
+      : "Not linked yet. Add an App Password below (or use the advanced OAuth option).";
     if (st.connected) {
-      $("#gmailBar").textContent = "📬 Live from " + st.email + " — every send/label/delete asks first.";
+      $("#gmailBar").textContent = "📬 Live from " + st.email + " — every send / label / delete asks first.";
       emails = emails.filter(e => !e.sample); // real inbox replaces the demo emails
       await gmailSync(true);
     }
   }
   if (NATIVE) {
     $("#gmailSyncBtn").addEventListener("click", () => gmailSync(false));
+    $("#gImapConnect").addEventListener("click", async () => {
+      const user = $("#gImapUser").value.trim();
+      const pass = $("#gImapPass").value;
+      if (!user || !pass) { gmailFix("Enter your Gmail address and App Password.", "BAD_INPUT"); return; }
+      $("#gmailStatus").textContent = "Linking…";
+      const r = await NATIVE.gmail.imapConnect({ user, pass });
+      $("#gImapPass").value = "";
+      if (!r.ok) {
+        gmailFix(r.error, r.code === "IMAP_DEPS" ? "IMAP_DEPS" : "IMAP_AUTH");
+        $("#gmailStatus").textContent = "Link failed — see the note.";
+        return;
+      }
+      await gmailBoot();
+      fixCard("Gmail linked — " + r.data.email, ["Miles and Alfred can read your inbox now.", "Try “Brief me” on the Inbox tab."], "info", { once: "gmail-linked" });
+    });
     $("#gSaveCreds").addEventListener("click", async () => {
       await NATIVE.gmail.setCreds({ clientId: $("#gClientId").value, clientSecret: $("#gClientSecret").value });
       $("#gClientSecret").value = "";
@@ -1167,9 +1218,9 @@
       gmailBoot();
     });
     $("#gDisconnect").addEventListener("click", async () => {
-      if (!confirm("Disconnect Gmail and forget the sign-in on this machine?")) return;
+      if (!confirm("Disconnect Gmail and forget the credentials on this machine?")) return;
       await NATIVE.gmail.disconnect();
-      emails = emails.filter(e => !e.gid); persist(); refreshAll();
+      emails = emails.filter(e => !e.gid); gmailConnected = false; persist(); refreshAll();
       gmailBoot();
     });
     $("#gQuery").addEventListener("change", e => { settings.gmailQuery = e.target.value.trim() || "in:inbox"; persist(); });
@@ -1687,6 +1738,7 @@
     $("#setEleven").value = settings.eleven;
     $("#setElevenVoice").value = settings.elevenVoice;
     $("#setRC").value = settings.rc;
+    renderVoiceToggle();
     populateVoices();
     if (settings.eleven) loadElevenVoices(true);
   }
@@ -1697,11 +1749,28 @@
     });
   }
   bindSetting("#setName", "name"); bindSetting("#setBiz", "biz");
-  bindSetting("#setVoice", "voice", "change");
   bindSetting("#setAnthropic", "anthropic"); bindSetting("#setModel", "model");
   bindSetting("#setEleven", "eleven"); bindSetting("#setElevenVoice", "elevenVoice");
   bindSetting("#setRC", "rc");
   $("#setBrowserVoice").addEventListener("change", e => { settings.browserVoice = e.target.value; persist(); });
+
+  // --- voices master on/off ---
+  function renderVoiceToggle() {
+    const b = $("#voiceToggle");
+    if (!b) return;
+    const on = !!settings.voice;
+    b.textContent = on ? "🔊 Voices on" : "🔇 Voices off";
+    b.classList.toggle("primary", on);
+    $("#setVoice").checked = on;
+  }
+  function setVoiceEnabled(on) {
+    settings.voice = !!on;
+    $("#setVoice").checked = settings.voice;
+    if (!settings.voice) stopSpeaking();
+    persist(); renderVoiceToggle();
+  }
+  $("#voiceToggle").addEventListener("click", () => setVoiceEnabled(!settings.voice));
+  $("#voiceStop").addEventListener("click", () => stopSpeaking());
 
   function populateVoices() {
     if (!("speechSynthesis" in window)) { $("#setBrowserVoice").disabled = true; return; }
@@ -1714,7 +1783,7 @@
   if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = populateVoices;
 
   $("#testVoice").addEventListener("click", () => {
-    if (!settings.voice) { settings.voice = true; $("#setVoice").checked = true; persist(); updateModeChip(); }
+    if (!settings.voice) setVoiceEnabled(true);
     speak(`Good ${partOfDay()}${settings.name ? ", " + settings.name : ""}. Alfred, reporting for duty.`);
   });
   // the four voice pickers → which setting each one writes

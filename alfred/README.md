@@ -18,9 +18,31 @@ Build a Windows installer (`dist/Alfred-Setup-<version>.exe`):
 npm run dist
 ```
 
-## Connect Gmail (one-time)
+## Connect Gmail
 
-### 1. Google Cloud project
+Two ways. Pick one — the app uses whichever you set up (IMAP wins if both exist).
+
+### Option A — App Password (simplest, no Google Cloud project)
+
+1. Google account → **Security** → turn on **2-Step Verification** (required for app
+   passwords).
+2. https://myaccount.google.com/apppasswords → create one named "Alfred" → copy the
+   16-character code.
+3. Gmail on the web → **Settings → See all settings → Forwarding and POP/IMAP** →
+   **Enable IMAP** → Save.
+4. In Alfred: **Settings → Gmail** → enter your address + the App Password →
+   **Link Gmail**. Miles and Alfred can read the inbox the moment it links.
+
+Read happens over IMAP (`imap.gmail.com:993`), sending over SMTP
+(`smtp.gmail.com:465`), both with the app password. The password is encrypted at rest
+(`safeStorage`) in `%APPDATA%/Alfred/imap-creds.bin`.
+
+### Option B — Google sign-in (OAuth)
+
+Under **Settings → Gmail → "Advanced: Google sign-in"**. More setup, but no app
+password and it uses a proper scoped token.
+
+#### 1. Google Cloud project
 1. https://console.cloud.google.com → create a project ("Alfred").
 2. **APIs & Services → Library** → **Gmail API** → **Enable**.
 3. **APIs & Services → OAuth consent screen**
@@ -34,21 +56,24 @@ npm run dist
    - Application type **Desktop app**.
    - Copy the **Client ID** and **Client secret**.
 
-### 2. In Alfred
-1. **Settings → Gmail** → paste the Client ID + secret → **Save**.
-2. **Connect Gmail** → the system browser opens → *"Google hasn't verified this
+#### 2. In Alfred
+1. **Settings → Gmail → Advanced** → paste the Client ID + secret → **Save**.
+2. **Connect via Google** → the system browser opens → *"Google hasn't verified this
    app"* → **Advanced → Go to Alfred (unsafe)** → approve.
 3. Done. The Inbox tab now shows your real mail; Miles briefs on it.
 
 ## How the sign-in is stored
 
-- The **Client ID / secret** go in `%APPDATA%/Alfred/google-creds.json` (a Desktop-app
+- **IMAP:** address + app password (+ host/port) encrypted with Electron `safeStorage`
+  (Windows DPAPI) at `%APPDATA%/Alfred/imap-creds.bin`.
+- **OAuth Client ID / secret:** `%APPDATA%/Alfred/google-creds.json` (a Desktop-app
   client secret is not confidential per Google's docs, but it's still kept out of the
-  repo). You can instead set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in
-  `alfred/.env` (gitignored) for development.
-- The **renewal (refresh) token** is encrypted with Electron `safeStorage` (Windows
-  DPAPI) at `%APPDATA%/Alfred/gmail-refresh.bin`. The 1-hour access token lives only
-  in memory and is refreshed silently.
+  repo), or `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `alfred/.env` (gitignored).
+- **OAuth refresh token:** encrypted at `%APPDATA%/Alfred/gmail-refresh.bin`. The
+  1-hour access token stays in memory and is refreshed silently.
+
+Nothing above is committed. `Disconnect Gmail` in Settings deletes whichever files
+apply.
 
 ## Safety
 

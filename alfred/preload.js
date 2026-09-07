@@ -7,10 +7,11 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("alfredNative", {
   platform: "electron",
   gmail: {
-    status:     () => ipcRenderer.invoke("gmail:status"),
-    setCreds:   (c) => ipcRenderer.invoke("gmail:setCreds", c),
-    connect:    () => ipcRenderer.invoke("gmail:connect"),
-    disconnect: () => ipcRenderer.invoke("gmail:disconnect"),
+    status:      () => ipcRenderer.invoke("gmail:status"),
+    setCreds:    (c) => ipcRenderer.invoke("gmail:setCreds", c),
+    connect:     () => ipcRenderer.invoke("gmail:connect"),
+    imapConnect: (c) => ipcRenderer.invoke("gmail:imapConnect", c),
+    disconnect:  () => ipcRenderer.invoke("gmail:disconnect"),
     list:       (a) => ipcRenderer.invoke("gmail:list", a),
     get:        (id) => ipcRenderer.invoke("gmail:get", id),
     send:       (a) => ipcRenderer.invoke("gmail:send", a),

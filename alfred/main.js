@@ -4,16 +4,19 @@
 
    Responsibilities:
    - open the window that loads index.html (the existing UI, unchanged in spirit)
-   - Google OAuth 2.0 for Gmail using the loopback + PKCE flow for "Desktop app"
-     clients: opens the system browser, catches the redirect on 127.0.0.1, trades
-     the code for an access token + refresh token
-   - store the refresh token encrypted at rest via Electron safeStorage (Windows
-     DPAPI); the access token is kept in memory and silently refreshed
-   - expose Gmail read/write over IPC. EVERY write (send / draft / modify / trash)
+   - two ways to reach Gmail, whichever the user set up:
+     * IMAP + SMTP with a Google App Password (simplest — no Cloud project). Active
+       whenever imap-creds.bin exists.
+     * Google OAuth 2.0, loopback + PKCE "Desktop app" flow (browser sign-in,
+       redirect caught on 127.0.0.1, refresh token kept).
+   - all credentials/tokens encrypted at rest via Electron safeStorage (Windows
+     DPAPI). OAuth access token stays in memory and is refreshed silently.
+   - expose Gmail read/write over IPC. EVERY write (send / draft / archive / trash)
      pops a native confirm dialog first — the user chose "confirm everything that
      writes".
    Nothing secret is ever written into the repo: Google client id/secret live in
-   the OS user-data dir (or an env var for dev), the refresh token is encrypted.
+   the OS user-data dir (or an env var for dev); tokens and the app password are
+   encrypted.
 --------------------------------------------------------------------------- */
 const { app, BrowserWindow, ipcMain, shell, dialog, safeStorage } = require("electron");
 const path = require("path");
@@ -276,24 +279,177 @@ async function trashMsg(a) {
   return gapi(`/messages/${a.id}/trash`, { method: "POST" });
 }
 
-/* ===================== IPC ===================== */
+/* ===================== IMAP + SMTP (app-password path) =====================
+   Browsers can't do IMAP, but the Electron main process (Node) can. When the
+   user saves IMAP credentials this becomes the active path — read over IMAP,
+   send over SMTP. Password is a Google App Password, encrypted at rest.        */
+const IMAP_FILE = () => dataFile("imap-creds.bin");
+let _ImapFlow = null, _simpleParser = null, _nodemailer = null;
+function loadImapDeps() {
+  if (_ImapFlow) return;
+  try {
+    _ImapFlow = require("imapflow").ImapFlow;
+    _simpleParser = require("mailparser").simpleParser;
+    _nodemailer = require("nodemailer");
+  } catch (e) {
+    const err = new Error("IMAP support isn't installed. Run `npm install` in the alfred folder.");
+    err.code = "IMAP_DEPS"; throw err;
+  }
+}
+function saveImap(c) {
+  const s = JSON.stringify(c);
+  fs.writeFileSync(IMAP_FILE(), safeStorage.isEncryptionAvailable()
+    ? safeStorage.encryptString(s) : Buffer.from("PLAIN:" + s, "utf8"));
+}
+function loadImap() {
+  try {
+    const buf = fs.readFileSync(IMAP_FILE());
+    const s = buf.subarray(0, 6).toString("utf8") === "PLAIN:" ? buf.toString("utf8").slice(6) : safeStorage.decryptString(buf);
+    return JSON.parse(s);
+  } catch { return null; }
+}
+const clearImap = () => { try { fs.unlinkSync(IMAP_FILE()); } catch {} };
+const imapActive = () => !!loadImap();
+
+async function imapConnect(raw) {
+  loadImapDeps();
+  const c = {
+    user: (raw.user || "").trim(),
+    pass: (raw.pass || "").replace(/\s+/g, ""), // app passwords are shown with spaces
+    host: (raw.host || "imap.gmail.com").trim(),
+    port: Number(raw.port) || 993,
+    smtpHost: (raw.smtpHost || "smtp.gmail.com").trim(),
+    smtpPort: Number(raw.smtpPort) || 465,
+  };
+  if (!c.user || !c.pass) { const e = new Error("Email and app password are both required."); e.code = "BAD_INPUT"; throw e; }
+  const client = new _ImapFlow({ host: c.host, port: c.port, secure: true, auth: { user: c.user, pass: c.pass }, logger: false, emitLogs: false });
+  try { await client.connect(); await client.logout(); }
+  catch (e) {
+    const err = new Error(/auth/i.test(e.message) || e.authenticationFailed
+      ? "Gmail rejected that sign-in. Use a 16-character App Password (Google Account → Security → App passwords), not your normal password, and make sure IMAP is enabled in Gmail settings."
+      : "Couldn't reach the mail server: " + e.message);
+    err.code = "IMAP_AUTH"; throw err;
+  }
+  saveImap(c);
+  return { email: c.user };
+}
+
+async function withImap(fn) {
+  loadImapDeps();
+  const c = loadImap();
+  if (!c) { const e = new Error("NOT_CONNECTED"); e.code = "NOT_CONNECTED"; throw e; }
+  const client = new _ImapFlow({ host: c.host, port: c.port, secure: true, auth: { user: c.user, pass: c.pass }, logger: false, emitLogs: false });
+  await client.connect();
+  try { return await fn(client, c); }
+  finally { try { await client.logout(); } catch {} }
+}
+async function boxFor(client, useFlag, fallback) {
+  try { for (const b of await client.list()) if (b.specialUse === useFlag) return b.path; } catch {}
+  return fallback;
+}
+const addr = a => a && a[0] ? { name: a[0].name || "", address: a[0].address || "" } : { name: "", address: "" };
+
+async function imapList({ mailbox = "INBOX", max = 25 } = {}) {
+  return withImap(async client => {
+    const lock = await client.getMailboxLock(mailbox);
+    try {
+      const total = client.mailbox.exists;
+      if (!total) return [];
+      const out = [];
+      for await (const m of client.fetch(`${Math.max(1, total - max + 1)}:*`, { envelope: true, flags: true })) {
+        const f = addr(m.envelope.from);
+        out.push({
+          id: String(m.uid), uid: m.uid,
+          from: f.name || f.address, fromRaw: f.address,
+          subject: m.envelope.subject || "(no subject)",
+          date: m.envelope.date ? new Date(m.envelope.date).toISOString() : "",
+          unread: !(m.flags && m.flags.has("\\Seen")),
+        });
+      }
+      return out.reverse();
+    } finally { lock.release(); }
+  });
+}
+async function imapGet({ id, mailbox = "INBOX" }) {
+  return withImap(async client => {
+    const lock = await client.getMailboxLock(mailbox);
+    try {
+      const m = await client.fetchOne(String(id), { source: true }, { uid: true });
+      const p = await _simpleParser(m.source);
+      const body = (p.text || (p.html ? String(p.html).replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " ") : "")).replace(/\s+\n/g, "\n").trim();
+      return { id, from: p.from && p.from.text, fromRaw: p.from && p.from.value && p.from.value[0] && p.from.value[0].address, to: p.to && p.to.text, subject: p.subject, date: p.date && p.date.toISOString(), body };
+    } finally { lock.release(); }
+  });
+}
+async function imapMoveTo(a, useFlag, fallback, verb) {
+  if (!await confirmWrite(`${verb} "${a.subject || ("message " + a.id)}"?`, "")) return { cancelled: true };
+  return withImap(async client => {
+    const dest = await boxFor(client, useFlag, fallback);
+    const lock = await client.getMailboxLock(a.mailbox || "INBOX");
+    try { await client.messageMove(String(a.id), dest, { uid: true }); return { movedTo: dest }; }
+    finally { lock.release(); }
+  });
+}
+async function imapMarkRead(a) {
+  return withImap(async client => {
+    const lock = await client.getMailboxLock(a.mailbox || "INBOX");
+    try { await client.messageFlagsAdd(String(a.id), ["\\Seen"], { uid: true }); return { ok: true }; }
+    finally { lock.release(); }
+  });
+}
+async function smtpSend(a) {
+  if (!await confirmWrite("Send this email?", `To: ${a.to}\nSubject: ${a.subject}\n\n${a.body}`)) return { cancelled: true };
+  const c = loadImap();
+  const t = _nodemailer.createTransport({ host: c.smtpHost, port: c.smtpPort, secure: true, auth: { user: c.user, pass: c.pass } });
+  const info = await t.sendMail({ from: c.user, to: a.to, subject: a.subject, text: a.body, inReplyTo: a.inReplyTo, references: a.references });
+  return { id: info.messageId };
+}
+async function imapAppendDraft(a) {
+  if (!await confirmWrite("Save this as a draft?", `To: ${a.to}\nSubject: ${a.subject}\n\n${a.body}`)) return { cancelled: true };
+  return withImap(async client => {
+    const box = await boxFor(client, "\\Drafts", "[Gmail]/Drafts");
+    const raw = `From: ${loadImap().user}\r\nTo: ${a.to}\r\nSubject: ${a.subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${a.body}`;
+    await client.append(box, raw, ["\\Draft"]);
+    return { box };
+  });
+}
+
+/* ===================== unified IPC ===================== */
 const guard = fn => async (...args) => {
   try { return { ok: true, data: await fn(...args) }; }
   catch (e) { return { ok: false, error: e.message, code: e.code || null }; }
 };
 
 ipcMain.handle("gmail:status", async () => {
+  if (imapActive()) {
+    const c = loadImap();
+    return { method: "imap", connected: true, email: c.user };
+  }
   const creds = !!(readCreds() && readCreds().clientId);
-  if (!loadRefreshToken()) return { creds, connected: false };
-  try { return { creds, connected: true, email: await fetchProfileEmail() }; }
-  catch (e) { return { creds, connected: false, expired: e.code === "TOKEN_EXPIRED", error: e.message }; }
+  if (!loadRefreshToken()) return { method: "oauth", creds, connected: false };
+  try { return { method: "oauth", creds, connected: true, email: await fetchProfileEmail() }; }
+  catch (e) { return { method: "oauth", creds, connected: false, expired: e.code === "TOKEN_EXPIRED", error: e.message }; }
 });
+
+// OAuth setup
 ipcMain.handle("gmail:setCreds", (_e, c) => { writeCreds({ clientId: (c.clientId || "").trim(), clientSecret: (c.clientSecret || "").trim() }); return { ok: true }; });
 ipcMain.handle("gmail:connect", guard(startAuth));
-ipcMain.handle("gmail:disconnect", () => { clearTokens(); try { fs.unlinkSync(CREDS_FILE()); } catch {} return { ok: true }; });
-ipcMain.handle("gmail:list", guard(a => listBrief(a || {})));
-ipcMain.handle("gmail:get", guard(id => getFull(id)));
-ipcMain.handle("gmail:send", guard(sendMail));
-ipcMain.handle("gmail:draft", guard(createDraft));
-ipcMain.handle("gmail:modify", guard(modify));
-ipcMain.handle("gmail:trash", guard(trashMsg));
+// IMAP setup
+ipcMain.handle("gmail:imapConnect", guard(imapConnect));
+// shared
+ipcMain.handle("gmail:disconnect", () => {
+  clearTokens(); clearImap();
+  try { fs.unlinkSync(CREDS_FILE()); } catch {}
+  return { ok: true };
+});
+ipcMain.handle("gmail:list",   guard(a => imapActive() ? imapList(a || {}) : listBrief(a || {})));
+ipcMain.handle("gmail:get",    guard(id => imapActive() ? imapGet({ id }) : getFull(id)));
+ipcMain.handle("gmail:send",   guard(a => imapActive() ? smtpSend(a) : sendMail(a)));
+ipcMain.handle("gmail:draft",  guard(a => imapActive() ? imapAppendDraft(a) : createDraft(a)));
+ipcMain.handle("gmail:modify", guard(a => {
+  if (!imapActive()) return modify(a);
+  // renderer sends {remove:["INBOX"]} for archive; anything else we treat as mark-read
+  if ((a.remove || []).includes("INBOX")) return imapMoveTo(a, "\\All", "[Gmail]/All Mail", "Archive");
+  return imapMarkRead(a);
+}));
+ipcMain.handle("gmail:trash",  guard(a => imapActive() ? imapMoveTo(a, "\\Trash", "[Gmail]/Trash", "Trash") : trashMsg(a)));

@@ -102,29 +102,40 @@ is the only accent; `--warn` / `--danger` / `--ok` for status.
 
 #### alfred — Electron / Gmail layer
 
-- `main.js` owns Google OAuth: **loopback + PKCE for a "Desktop app" client**. On
-  connect it starts an `http` server on `127.0.0.1:0`, opens the system browser to
-  Google's consent URL with that port as `redirect_uri`, catches `?code=`, and trades
-  it (with `code_verifier` + client secret) at `oauth2.googleapis.com/token` for an
-  access token + **refresh token**. Refresh token is stored via `safeStorage`
-  (Windows DPAPI) at `userData/gmail-refresh.bin`; access token stays in memory,
-  `getAccessToken()` refreshes it. `invalid_grant` on refresh → `TOKEN_EXPIRED` (the
-  consent screen is still in "Testing" — 7-day cap; fix is publish to production).
-- Google client id/secret: `userData/google-creds.json` or `GOOGLE_CLIENT_*` env /
-  `alfred/.env` (all gitignored). Never in the repo.
-- Gmail REST via `gapi()`; `listBrief()` pulls metadata + snippet, `getFull()` walks
-  the MIME tree (`extractBody`). **Every write — `sendMail` / `createDraft` / `modify`
-  / `trashMsg` — calls `confirmWrite()` (`dialog.showMessageBox`) first** and returns
-  `{cancelled:true}` if declined. All IPC handlers wrapped in `guard()` →
-  `{ok, data|error, code}`.
+Two Gmail transports in `main.js`; `imapActive()` (the `imap-creds.bin` file exists)
+picks IMAP, otherwise OAuth. Every `gmail:*` IPC handler branches on it, so the
+renderer only ever calls `NATIVE.gmail.list/get/send/draft/modify/trash`.
+
+- **IMAP + SMTP path** (simplest for the user — no Cloud project). `imapConnect()`
+  verifies an address + Google **App Password** against `imap.gmail.com:993`, then
+  encrypts `{user,pass,host,port,smtpHost,smtpPort}` to `userData/imap-creds.bin`.
+  Reads via `imapflow` (`imapList` = last N of INBOX, `imapGet` + `mailparser` for
+  bodies); `modify {remove:["INBOX"]}` → move to `\All`, `trash` → move to `\Trash`
+  (`boxFor()` resolves special-use, Gmail folder names as fallback); `send` via
+  `nodemailer` SMTP `465`; `draft` = IMAP `APPEND` to `\Drafts`. `imapflow` /
+  `mailparser` / `nodemailer` are lazy-`require`d so a missing `npm install` yields
+  `IMAP_DEPS` rather than a startup crash.
+- **OAuth path**: loopback + PKCE for a "Desktop app" client. `startAuth()` runs an
+  `http` server on `127.0.0.1:0`, opens the system browser, catches `?code=`, trades
+  it at `oauth2.googleapis.com/token` for access + **refresh** token. Refresh token
+  encrypted at `userData/gmail-refresh.bin`; access token in memory,
+  `getAccessToken()` refreshes. `invalid_grant` → `TOKEN_EXPIRED` (consent screen
+  still "Testing" = 7-day cap; fix = publish to production). Client id/secret in
+  `userData/google-creds.json` or `GOOGLE_CLIENT_*` env / `alfred/.env` (gitignored).
+- **Every write asks first**: `confirmWrite()` (`dialog.showMessageBox`) on send /
+  draft / archive / trash, both transports; returns `{cancelled:true}` if declined.
+  IPC handlers wrapped in `guard()` → `{ok, data|error, code}`.
 - `preload.js` exposes `window.alfredNative.gmail.*`. In `index.html`, `NATIVE` gates
-  the whole Gmail path: `gmailBoot()` renders connection state in Settings,
-  `gmailSync()` maps messages into the existing `emails` array (tagged with `gid`;
-  hand-added emails without `gid` are preserved), per-item buttons call
-  `gmailWrite()` / `gmailDraftReply()`. `confirmAI()` gates sending any email body to
-  Anthropic ("ask me per action"; `#gAiAlways` / `settings.aiEmailAlways` opts out);
-  `alfredSystem()` drops email bodies from the chat system prompt while Gmail is
-  connected unless `aiAlways`.
+  the Gmail path: `gmailBoot()` renders connection state + swaps the IMAP / OAuth
+  setup blocks in Settings, `gmailSync()` maps messages into `emails` (tagged `gid`;
+  hand-added emails without `gid` preserved), per-item buttons call `gmailWrite()` /
+  `gmailDraftReply()`. `confirmAI()` gates sending any email body to Anthropic ("ask
+  me per action"; `#gAiAlways` / `settings.aiEmailAlways` opts out); `alfredSystem()`
+  drops email bodies from the chat system prompt while Gmail is connected unless
+  `aiAlways`.
+- **Voice master switch**: `#voiceToggle` / `setVoiceEnabled()` flips `settings.voice`
+  (the old `#setVoice` checkbox is now a hidden state holder); `#voiceStop` calls
+  `stopSpeaking()`. `speak()` already early-returns when `!settings.voice`.
 
 ## Conventions
 
