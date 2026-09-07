@@ -1750,7 +1750,9 @@
   }
   bindSetting("#setName", "name"); bindSetting("#setBiz", "biz");
   bindSetting("#setAnthropic", "anthropic"); bindSetting("#setModel", "model");
-  bindSetting("#setEleven", "eleven"); bindSetting("#setElevenVoice", "elevenVoice");
+  // ElevenLabs keys are always lowercase "sk_…" — fix a capitalised prefix quietly
+  bindSetting("#setEleven", "eleven", "input", v => v.replace(/^sk_/i, "sk_"));
+  bindSetting("#setElevenVoice", "elevenVoice");
   bindSetting("#setRC", "rc");
   $("#setBrowserVoice").addEventListener("change", e => { settings.browserVoice = e.target.value; persist(); });
 
