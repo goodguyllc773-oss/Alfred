@@ -440,8 +440,10 @@
         <div class="panel">
           <h2>Inbox <span class="who">Miles</span></h2>
           <p class="sub">Miles keeps the email under control and tells you what actually needs you.</p>
+          <p class="sub" id="gmailBar" hidden></p>
           <div class="inline" style="margin-bottom:12px">
             <button class="btn primary" id="briefBtn">Brief me</button>
+            <button class="btn sm" id="gmailSyncBtn" hidden>Sync Gmail</button>
             <button class="btn ghost sm" id="addEmailToggle">+ Add email</button>
             <button class="btn ghost sm danger" id="clearEmails">Clear all</button>
           </div>
@@ -559,6 +561,25 @@
           <div class="field"><label>What should Alfred call you?</label><input id="setName" placeholder="e.g. Alex"></div>
           <div class="field"><label>About the business (Alfred & Ivy use this)</label><textarea id="setBiz" placeholder="A sentence or two about the work"></textarea></div>
           <hr class="sep">
+          <h2>Gmail <span class="who">Miles</span></h2>
+          <div id="gmailOnly" hidden>
+            <p class="sub" id="gmailStatus">Checking…</p>
+            <div class="field"><label>Google Client ID</label><input id="gClientId" placeholder="…apps.googleusercontent.com" autocomplete="off"></div>
+            <div class="field"><label>Google Client secret</label><input id="gClientSecret" type="password" placeholder="GOCSPX-…" autocomplete="off"></div>
+            <div class="inline">
+              <button class="btn sm" id="gSaveCreds">Save</button>
+              <button class="btn primary sm" id="gConnect">Connect Gmail</button>
+              <button class="btn ghost sm danger" id="gDisconnect" hidden>Disconnect</button>
+            </div>
+            <div class="row" style="margin-top:12px">
+              <div class="field"><label>Search / filter</label><input id="gQuery" placeholder="in:inbox"></div>
+              <div class="field"><label>How many</label><input id="gMax" type="number" min="5" max="100" placeholder="25"></div>
+            </div>
+            <label class="toggle" style="margin-top:6px"><input type="checkbox" id="gAiAlways"> Let Alfred send email text to the AI without asking each time</label>
+            <p class="foot faint" style="margin-top:8px">Sign-in stays on this machine (renewal token encrypted in Windows). Every send, label, or delete asks first.</p>
+          </div>
+          <p class="sub" id="gmailWebNote">Gmail connects only in the Alfred desktop app. In a browser you can still add or paste emails by hand.</p>
+          <hr class="sep">
           <h2>Voice</h2>
           <label class="toggle"><input type="checkbox" id="setVoice"> Alfred speaks (greeting + replies read aloud)</label>
           <div class="field" style="margin-top:10px"><label>Browser voice</label>
@@ -665,7 +686,11 @@
     voiceMiles:  "nPczCjzI2devNBz1zQrb", // Miles   — Brian   (deep, reassuring)
     voiceOtto:   "onwK4e9ZLuTAKqWW03F9", // Otto    — Daniel  (steady broadcaster)
     voiceIvy:    "EXAVITQu4vr4xnSDxMaL", // Ivy     — Sarah   (confident, clear)
+    gmailQuery: "in:inbox", gmailMax: 25, // Gmail sync (desktop app only)
   }, store.get("settings", {}));
+
+  const NATIVE = (typeof window !== "undefined" && window.alfredNative) || null;
+  let gmailConnected = false;
 
   let orders = store.get("orders", null);
   let emails = store.get("emails", null);
@@ -975,16 +1000,24 @@
     else {
       list.replaceChildren(...emails.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map(e => {
         const flag = isFlagged(e);
+        const acts = e.gid
+          ? [
+              el("button", { text: "draft reply", onclick: () => gmailDraftReply(e) }),
+              el("button", { text: "archive", onclick: () => gmailWrite("modify", { id: e.gid, remove: ["INBOX"], describe: `Archive "${e.subject}"?` }) }),
+              el("button", { text: "trash", onclick: () => gmailWrite("trash", { id: e.gid, subject: e.subject }) }),
+            ]
+          : [
+              el("button", { text: e.read ? "mark unread" : "mark read", onclick: () => { e.read = !e.read; persist(); refreshAll(); } }),
+              el("button", { text: "delete", onclick: () => { emails = emails.filter(x => x.id !== e.id); persist(); refreshAll(); } }),
+            ];
         return el("div", { class: "item" }, [
           el("div", { class: "line1" }, [
             !e.read ? el("span", { class: "dot-unread" }) : null,
             el("span", { class: "t", text: e.subject || "(no subject)" }),
             flag ? el("span", { class: "pill danger", text: "needs you" }) : null,
+            e.gid ? el("span", { class: "pill dim", text: "gmail" }) : null,
             e.sample ? el("span", { class: "pill dim", text: "sample" }) : null,
-            el("div", { class: "acts" }, [
-              el("button", { text: e.read ? "mark unread" : "mark read", onclick: () => { e.read = !e.read; persist(); refreshAll(); } }),
-              el("button", { text: "delete", onclick: () => { emails = emails.filter(x => x.id !== e.id); persist(); refreshAll(); } }),
-            ]),
+            el("div", { class: "acts" }, acts),
           ]),
           el("div", { class: "meta", text: `${e.from || "unknown"} · ${fmtDate(e.date) || "no date"}` }),
           e.body ? el("div", { class: "meta", text: e.body.slice(0, 160) + (e.body.length > 160 ? "…" : "") }) : null,
@@ -1011,9 +1044,10 @@
   $("#briefBtn").addEventListener("click", () => runBrief());
   async function runBrief() {
     const out = $("#briefOut");
+    if (gmailConnected) { out.className = ""; out.innerHTML = "<span class='muted'>Miles is fetching Gmail…</span>"; await gmailSync(true); }
     if (!emails.length) { out.className = "empty"; out.textContent = "No emails to brief on yet."; return; }
     out.className = ""; out.innerHTML = "<span class='muted'>Miles is reading…</span>";
-    if (settings.anthropic) {
+    if (settings.anthropic && await confirmAI("summarize " + emails.length + " emails")) {
       const data = emails.map(e => ({ from: e.from, subject: e.subject, body: (e.body || "").slice(0, 400), read: !!e.read }));
       const r = await askClaude(
         "You are Miles, the email manager on Alfred's team. Give a tight brief: 2-3 sentence overview, then a short bullet list of items that need action (most urgent first) with a suggested next step each. Plain, practical, no fluff.",
@@ -1023,6 +1057,124 @@
     }
     out.innerHTML = fmt(localBrief());
     sayGist(out, "miles");
+  }
+
+  /* ===================================================================
+     Gmail (desktop app only — window.alfredNative provided by preload)
+  =================================================================== */
+  // "Ask me per action" before any email text is sent to the Anthropic API
+  let aiAlways = !!settings.aiEmailAlways;
+  async function confirmAI(what) {
+    if (!settings.anthropic) return false;
+    if (aiAlways) return true;
+    return confirm(`Send email content to the Anthropic API to ${what}?\n\nOK = yes  ·  Cancel = keep it local this time.`);
+  }
+
+  function gmailFix(msg, code) {
+    const steps = {
+      NO_CREDS: ["Open Settings → Gmail.", "Paste the Client ID and Client secret from your Google Cloud project (APIs & Services → Credentials → your OAuth client).", "Press Save, then Connect Gmail."],
+      NOT_CONNECTED: ["Open Settings → Gmail and press Connect Gmail.", "Approve the permissions in the browser window that opens."],
+      TOKEN_EXPIRED: ["Google signed Alfred out (this happens if the consent screen is still in 'Testing' — tokens last 7 days there).", "In the Google Cloud console → OAuth consent screen → press 'Publish app' / set it to 'In production'.", "Back in Alfred: Settings → Gmail → Connect Gmail again."],
+    };
+    fixCard("Gmail: " + (msg || "something went wrong"),
+      steps[code] || [
+        "Open Settings → Gmail and check the connection.",
+        "If it keeps failing, press Disconnect, then Connect Gmail again.",
+        (msg || "").slice(0, 200),
+      ], "warn", { once: "gmail-" + (code || msg || "x") });
+  }
+
+  async function gmailSync(quiet) {
+    if (!gmailConnected) return;
+    const res = await NATIVE.gmail.list({ q: settings.gmailQuery || "in:inbox", max: Number(settings.gmailMax) || 25 });
+    if (!res.ok) { gmailFix(res.error, res.code); return; }
+    // replace Gmail-sourced emails, keep any hand-added ones
+    const manual = emails.filter(e => !e.gid);
+    emails = res.data.map(m => ({
+      id: "g_" + m.id, gid: m.id, threadId: m.threadId,
+      from: cleanFrom(m.from), fromRaw: m.from, subject: m.subject,
+      body: m.snippet || "", date: gmailDate(m.date), read: !m.unread, labelIds: m.labelIds,
+    })).concat(manual);
+    persist(); refreshAll();
+    if (!quiet) fixCard("Synced " + res.data.length + " emails from Gmail", ["Miles is working from your real inbox now."], "info", { once: "gmail-synced" });
+  }
+  function cleanFrom(s) { const m = /"?([^"<]*)"?\s*<([^>]+)>/.exec(s || ""); return m ? (m[1].trim() || m[2]) : (s || "unknown"); }
+  function gmailDate(s) { const d = new Date(s); return isNaN(d) ? todayISO() : d.toISOString().slice(0, 10); }
+
+  async function gmailWrite(op, args) {
+    const res = await NATIVE.gmail[op](args);
+    if (!res.ok) { gmailFix(res.error, res.code); return; }
+    if (res.data && res.data.cancelled) return;
+    fixCard("Done — " + op, ["Gmail updated. Re-syncing."], "info", { once: null, autohide: true });
+    await gmailSync(true);
+  }
+  async function gmailDraftReply(e) {
+    const full = await NATIVE.gmail.get(e.gid);
+    if (!full.ok) { gmailFix(full.error, full.code); return; }
+    let bodyText;
+    if (settings.anthropic && await confirmAI("draft a reply to \"" + e.subject + "\"")) {
+      bodyText = await askClaude(
+        "You are Miles. Draft a short, warm, professional reply to this email for the user to review. Return only the reply body, no subject line, no preamble.",
+        "From: " + full.data.from + "\nSubject: " + full.data.subject + "\n\n" + (full.data.body || "").slice(0, 3000)
+      );
+    }
+    if (!bodyText) bodyText = "Hi,\n\nThanks for your email — I'll get back to you shortly with a full answer.\n\nBest,\n" + (settings.name || "");
+    const res = await NATIVE.gmail.draft({
+      to: e.fromRaw || e.from,
+      subject: /^re:/i.test(e.subject) ? e.subject : "Re: " + e.subject,
+      body: bodyText,
+      threadId: e.threadId,
+    });
+    if (!res.ok) { gmailFix(res.error, res.code); return; }
+    if (res.data && res.data.cancelled) return;
+    fixCard("Draft saved to Gmail", ["Open Gmail → Drafts to review and send it."], "info", { once: null });
+  }
+
+  async function gmailBoot() {
+    $("#gmailOnly").hidden = false;
+    $("#gmailWebNote").hidden = true;
+    $("#gQuery").value = settings.gmailQuery || "in:inbox";
+    $("#gMax").value = Number(settings.gmailMax) || 25;
+    $("#gAiAlways").checked = aiAlways;
+    const st = await NATIVE.gmail.status();
+    gmailConnected = !!st.connected;
+    $("#gmailStatus").textContent = st.connected
+      ? "Connected as " + st.email
+      : st.expired ? "Signed out by Google — reconnect below."
+      : st.creds ? "Credentials saved. Press Connect Gmail."
+      : "Not set up. Add your Google Client ID + secret below.";
+    $("#gConnect").hidden = st.connected;
+    $("#gDisconnect").hidden = !st.connected;
+    $("#gmailSyncBtn").hidden = !st.connected;
+    $("#gmailBar").hidden = !st.connected;
+    if (st.connected) {
+      $("#gmailBar").textContent = "📬 Live from " + st.email + " — every send/label/delete asks first.";
+      emails = emails.filter(e => !e.sample); // real inbox replaces the demo emails
+      await gmailSync(true);
+    }
+  }
+  if (NATIVE) {
+    $("#gmailSyncBtn").addEventListener("click", () => gmailSync(false));
+    $("#gSaveCreds").addEventListener("click", async () => {
+      await NATIVE.gmail.setCreds({ clientId: $("#gClientId").value, clientSecret: $("#gClientSecret").value });
+      $("#gClientSecret").value = "";
+      gmailBoot();
+    });
+    $("#gConnect").addEventListener("click", async () => {
+      $("#gmailStatus").textContent = "Opening Google sign-in…";
+      const r = await NATIVE.gmail.connect();
+      if (!r.ok) { gmailFix(r.error, r.code); $("#gmailStatus").textContent = "Connection failed."; return; }
+      gmailBoot();
+    });
+    $("#gDisconnect").addEventListener("click", async () => {
+      if (!confirm("Disconnect Gmail and forget the sign-in on this machine?")) return;
+      await NATIVE.gmail.disconnect();
+      emails = emails.filter(e => !e.gid); persist(); refreshAll();
+      gmailBoot();
+    });
+    $("#gQuery").addEventListener("change", e => { settings.gmailQuery = e.target.value.trim() || "in:inbox"; persist(); });
+    $("#gMax").addEventListener("change", e => { settings.gmailMax = Math.max(5, Math.min(100, Number(e.target.value) || 25)); persist(); });
+    $("#gAiAlways").addEventListener("change", e => { aiAlways = e.target.checked; settings.aiEmailAlways = aiAlways; persist(); });
   }
   function localBrief() {
     const unread = emails.filter(e => !e.read);
@@ -1393,7 +1545,11 @@
       ``,
       `LIVE DATA (JSON):`,
       `orders = ${JSON.stringify(orders.map(o => ({ item:o.item, vendor:o.vendor, ref:o.ref, status:o.status, shipped:o.shipped, eta:o.eta, notes:o.notes })))}`,
-      `emails = ${JSON.stringify(emails.map(e => ({ from:e.from, subject:e.subject, body:(e.body||"").slice(0,300), read:!!e.read })))}`,
+      // subjects + senders flow freely; email body/preview text only goes to the API
+      // after an explicit "yes" (the Brief me button asks). aiAlways lifts that.
+      `emails = ${JSON.stringify(emails.map(e => (gmailConnected && !aiAlways)
+        ? ({ from:e.from, subject:e.subject, read:!!e.read })
+        : ({ from:e.from, subject:e.subject, body:(e.body||"").slice(0,300), read:!!e.read })))}`,
       `saved_ideas = ${JSON.stringify(ideas)}`,
     ].join("\n");
   }
@@ -1650,8 +1806,9 @@
 
   $("#testRC").addEventListener("click", () => tryRevenueCat(false));
 
-  $("#wipeAll").addEventListener("click", () => {
+  $("#wipeAll").addEventListener("click", async () => {
     if (!confirm("Erase all Alfred data on this device? This cannot be undone.")) return;
+    if (NATIVE) { try { await NATIVE.gmail.disconnect(); } catch {} }
     ["settings", "orders", "emails", "ideas", "chat", "tab", "greetDay"].forEach(store.del);
     location.reload();
   });
@@ -1682,6 +1839,7 @@
   renderChat();
   refreshAll();
   go(store.get("tab", "alfred"));
+  if (NATIVE) gmailBoot();
 
   // greet — once we know voices are likely ready
   function bootGreeting() {

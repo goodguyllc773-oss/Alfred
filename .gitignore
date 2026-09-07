@@ -1,0 +1,13 @@
+# Node / Electron (alfred desktop app)
+node_modules/
+alfred/node_modules/
+alfred/dist/
+alfred/out/
+alfred/.env
+alfred/.env.*
+!alfred/.env.example
+
+# OS / editor
+Thumbs.db
+.DS_Store
+*.log

@@ -4,23 +4,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Alfred is a collection of small, self-contained web tools. Each tool lives in its own
-top-level directory and is a single static HTML file with no build step, no
-dependencies, and no server — inline `<style>` and `<script>`, opened directly in a
-browser.
+Alfred started as a collection of small, self-contained static web tools — one tool
+per top-level directory, a single `index.html` with inline `<style>`/`<script>`, no
+build, opened straight in a browser.
 
-Current tools:
-- `timebox-timer/index.html` — a Pomodoro-style focus timer.
-- `alfred/index.html` — a personal "chief of staff" desk: a chat with Alfred plus
-  employee tabs for email (Miles), orders (Otto), ideas (Ivy) and revenue.
+- `timebox-timer/` — a Pomodoro-style focus timer. Still a pure static file.
+- `alfred/` — a personal "chief of staff" desk (chat with Alfred + employee tabs for
+  email/Miles, orders/Otto, ideas/Ivy, revenue). The UI is still one static
+  `index.html` and still works opened directly, **but it now also has an Electron
+  wrapper** (`main.js` / `preload.js` / `package.json`) that adds real Gmail access.
+  When run in Electron the page sees `window.alfredNative`; without it, the Gmail
+  features hide and everything else works as before.
 
 ## Running / developing
 
-There is no build, lint, test, or package manager setup. To work on a tool, open its
-`index.html` in a browser and reload after edits. For a local server (e.g. to test
-across devices):
+`timebox-timer`: open `index.html` in a browser.
 
-    python -m http.server 8000    # then visit http://localhost:8000/timebox-timer/
+`alfred` in a browser: open `alfred/index.html` directly (no Gmail).
+
+`alfred` as the desktop app:
+
+    cd alfred
+    npm install
+    npm start            # dev run
+    npm run dist         # build dist/Alfred-Setup-<version>.exe (electron-builder)
+
+Still no lint or test setup. See `alfred/README.md` for the one-time Google Cloud /
+OAuth setup needed before Gmail will connect.
 
 ## Architecture notes
 
@@ -90,9 +100,37 @@ is the only accent; `--warn` / `--danger` / `--ok` for status.
 - `fmt()` is a tiny escape-first markdown renderer (bold / italic / code / bullets)
   used for all AI and template output.
 
+#### alfred — Electron / Gmail layer
+
+- `main.js` owns Google OAuth: **loopback + PKCE for a "Desktop app" client**. On
+  connect it starts an `http` server on `127.0.0.1:0`, opens the system browser to
+  Google's consent URL with that port as `redirect_uri`, catches `?code=`, and trades
+  it (with `code_verifier` + client secret) at `oauth2.googleapis.com/token` for an
+  access token + **refresh token**. Refresh token is stored via `safeStorage`
+  (Windows DPAPI) at `userData/gmail-refresh.bin`; access token stays in memory,
+  `getAccessToken()` refreshes it. `invalid_grant` on refresh → `TOKEN_EXPIRED` (the
+  consent screen is still in "Testing" — 7-day cap; fix is publish to production).
+- Google client id/secret: `userData/google-creds.json` or `GOOGLE_CLIENT_*` env /
+  `alfred/.env` (all gitignored). Never in the repo.
+- Gmail REST via `gapi()`; `listBrief()` pulls metadata + snippet, `getFull()` walks
+  the MIME tree (`extractBody`). **Every write — `sendMail` / `createDraft` / `modify`
+  / `trashMsg` — calls `confirmWrite()` (`dialog.showMessageBox`) first** and returns
+  `{cancelled:true}` if declined. All IPC handlers wrapped in `guard()` →
+  `{ok, data|error, code}`.
+- `preload.js` exposes `window.alfredNative.gmail.*`. In `index.html`, `NATIVE` gates
+  the whole Gmail path: `gmailBoot()` renders connection state in Settings,
+  `gmailSync()` maps messages into the existing `emails` array (tagged with `gid`;
+  hand-added emails without `gid` are preserved), per-item buttons call
+  `gmailWrite()` / `gmailDraftReply()`. `confirmAI()` gates sending any email body to
+  Anthropic ("ask me per action"; `#gAiAlways` / `settings.aiEmailAlways` opts out);
+  `alfredSystem()` drops email bodies from the chat system prompt while Gmail is
+  connected unless `aiAlways`.
+
 ## Conventions
 
 - Palette and spacing are driven by CSS custom properties on `:root`. `timebox-timer`
   ships light + a `prefers-color-scheme: dark` override; `alfred` is dark-only by
   design. Either way, reuse the variables rather than hard-coding colors.
-- Keep tools dependency-free and single-file unless there's a strong reason not to.
+- `timebox-timer` stays dependency-free and single-file. `alfred`'s **UI** stays a
+  single `index.html` that must keep working when opened directly (feature-detect
+  `window.alfredNative`); its Electron wrapper is the one place npm deps are allowed.
