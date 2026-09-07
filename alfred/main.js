@@ -51,10 +51,12 @@ let accessTokenExp = 0;
 
 /* ===================== window ===================== */
 function createWindow() {
+  const iconPath = path.join(__dirname, "assets", "alfred.png");
   win = new BrowserWindow({
     width: 1200, height: 820, minWidth: 900, minHeight: 600,
     backgroundColor: "#0b1322",
     title: "Alfred",
+    icon: fs.existsSync(iconPath) ? iconPath : undefined,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),

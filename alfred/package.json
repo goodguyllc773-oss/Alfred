@@ -23,10 +23,12 @@
     "files": [
       "main.js",
       "preload.js",
-      "index.html"
+      "index.html",
+      "assets/**/*"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/alfred.png"
     },
     "nsis": {
       "oneClick": false,
