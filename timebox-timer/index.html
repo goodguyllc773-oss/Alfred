@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Time-box Timer</title>
+<style>
+  :root {
+    --bg: #f4f4f2;
+    --card: #ffffff;
+    --ink: #1c1c1e;
+    --muted: #6b6b70;
+    --line: #e2e2de;
+    --accent: #e5533d;
+    --accent-soft: #f7d9d3;
+    --good: #2f9e6f;
+    --shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121213;
+      --card: #1d1d1f;
+      --ink: #f2f2f4;
+      --muted: #9a9aa0;
+      --line: #2e2e31;
+      --accent: #ff6b52;
+      --accent-soft: #3a2420;
+      --good: #48c78e;
+      --shadow: 0 1px 3px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 420px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+    padding: 28px 26px 24px;
+    text-align: center;
+  }
+
+  h1 {
+    margin: 0 0 2px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: .01em;
+  }
+  .sub {
+    margin: 0 0 22px;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+
+  .presets {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--ink);
+    padding: 7px 13px;
+    border-radius: 999px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, transform .05s;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip:active { transform: scale(.96); }
+  .chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .dial {
+    position: relative;
+    width: 220px;
+    height: 220px;
+    margin: 0 auto 20px;
+  }
+  .dial svg { transform: rotate(-90deg); }
+  .track { stroke: var(--line); }
+  .prog {
+    stroke: var(--accent);
+    stroke-linecap: round;
+    transition: stroke-dashoffset .95s linear;
+  }
+  .readout {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .time {
+    font-size: 44px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .01em;
+  }
+  .state {
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    margin-top: 4px;
+  }
+
+  .controls {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 22px;
+  }
+  button.act {
+    appearance: none;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: var(--ink);
+    padding: 10px 20px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, transform .05s;
+  }
+  button.act:active { transform: scale(.97); }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    min-width: 108px;
+  }
+  button.act:hover:not(.primary) { border-color: var(--accent); }
+
+  .tally {
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 8px;
+  }
+  .tally .n {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--good);
+    font-variant-numeric: tabular-nums;
+  }
+  .tally .label { color: var(--muted); font-size: 13px; }
+  .dots {
+    margin-top: 10px;
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    flex-wrap: wrap;
+    min-height: 10px;
+  }
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--good);
+    opacity: .85;
+  }
+  .reset-tally {
+    margin-top: 14px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 11.5px;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .reset-tally:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Time-box Timer</h1>
+    <p class="sub">Pick a length, hit start, do one thing.</p>
+
+    <div class="presets" id="presets">
+      <button class="chip" data-min="5">5</button>
+      <button class="chip" data-min="15">15</button>
+      <button class="chip active" data-min="25">25</button>
+      <button class="chip" data-min="50">50</button>
+    </div>
+
+    <div class="dial">
+      <svg width="220" height="220" viewBox="0 0 220 220">
+        <circle class="track" cx="110" cy="110" r="100" fill="none" stroke-width="12"/>
+        <circle class="prog" id="prog" cx="110" cy="110" r="100" fill="none" stroke-width="12"
+                stroke-dasharray="628.318" stroke-dashoffset="0"/>
+      </svg>
+      <div class="readout">
+        <div class="time" id="time">25:00</div>
+        <div class="state" id="state">Ready</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="act primary" id="startBtn">Start</button>
+      <button class="act" id="resetBtn">Reset</button>
+    </div>
+
+    <div class="tally">
+      <span class="n" id="tallyN">0</span>
+      <span class="label">sessions done today</span>
+    </div>
+    <div class="dots" id="dots"></div>
+    <button class="reset-tally" id="resetTally">clear today</button>
+  </main>
+
+<script>
+(function () {
+  const CIRC = 2 * Math.PI * 100; // ~628.318
+  const progEl = document.getElementById('prog');
+  const timeEl = document.getElementById('time');
+  const stateEl = document.getElementById('state');
+  const startBtn = document.getElementById('startBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const presetsEl = document.getElementById('presets');
+  const tallyNEl = document.getElementById('tallyN');
+  const dotsEl = document.getElementById('dots');
+  const resetTallyBtn = document.getElementById('resetTally');
+
+  progEl.setAttribute('stroke-dasharray', CIRC.toFixed(3));
+
+  let durationSec = 25 * 60;
+  let remaining = durationSec;
+  let ticking = false;
+  let endAt = 0;
+  let raf = null;
+
+  // ---- daily tally (localStorage) ----
+  const todayKey = () => 'timebox-' + new Date().toISOString().slice(0, 10);
+  function getCount() {
+    try { return parseInt(localStorage.getItem(todayKey()) || '0', 10) || 0; }
+    catch (e) { return 0; }
+  }
+  function setCount(n) {
+    try { localStorage.setItem(todayKey(), String(n)); } catch (e) {}
+    renderTally(n);
+  }
+  function renderTally(n) {
+    tallyNEl.textContent = n;
+    dotsEl.innerHTML = '';
+    for (let i = 0; i < n; i++) {
+      const d = document.createElement('span');
+      d.className = 'dot';
+      dotsEl.appendChild(d);
+    }
+  }
+
+  // ---- rendering ----
+  function fmt(s) {
+    const m = Math.floor(s / 60);
+    const r = Math.floor(s % 60);
+    return String(m).padStart(2, '0') + ':' + String(r).padStart(2, '0');
+  }
+  function paint() {
+    timeEl.textContent = fmt(Math.ceil(remaining));
+    const frac = durationSec > 0 ? remaining / durationSec : 0;
+    progEl.style.strokeDashoffset = (CIRC * (1 - frac)).toFixed(2);
+    document.title = ticking ? fmt(Math.ceil(remaining)) + ' — Time-box' : 'Time-box Timer';
+  }
+
+  function loop() {
+    remaining = Math.max(0, (endAt - Date.now()) / 1000);
+    paint();
+    if (remaining <= 0) { finish(); return; }
+    raf = requestAnimationFrame(loop);
+  }
+
+  function start() {
+    if (ticking) { pause(); return; }
+    ticking = true;
+    endAt = Date.now() + remaining * 1000;
+    startBtn.textContent = 'Pause';
+    stateEl.textContent = 'Focus';
+    loop();
+  }
+  function pause() {
+    ticking = false;
+    cancelAnimationFrame(raf);
+    startBtn.textContent = 'Resume';
+    stateEl.textContent = 'Paused';
+    paint();
+  }
+  function reset() {
+    ticking = false;
+    cancelAnimationFrame(raf);
+    remaining = durationSec;
+    startBtn.textContent = 'Start';
+    stateEl.textContent = 'Ready';
+    paint();
+  }
+  function finish() {
+    ticking = false;
+    cancelAnimationFrame(raf);
+    remaining = 0;
+    paint();
+    startBtn.textContent = 'Start';
+    stateEl.textContent = 'Done';
+    chime();
+    setCount(getCount() + 1);
+    remaining = durationSec; // arm for the next round
+    setTimeout(paint, 900);
+  }
+
+  // ---- chime (WebAudio, no asset needed) ----
+  function chime() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      const ac = new Ctx();
+      const notes = [880, 1108.73, 1318.51]; // A5, C#6, E6
+      notes.forEach((f, i) => {
+        const o = ac.createOscillator();
+        const g = ac.createGain();
+        o.type = 'sine';
+        o.frequency.value = f;
+        const t0 = ac.currentTime + i * 0.14;
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.9);
+        o.connect(g).connect(ac.destination);
+        o.start(t0);
+        o.stop(t0 + 1);
+      });
+      setTimeout(() => ac.close(), 2000);
+    } catch (e) {}
+  }
+
+  // ---- events ----
+  startBtn.addEventListener('click', start);
+  resetBtn.addEventListener('click', reset);
+
+  presetsEl.addEventListener('click', function (e) {
+    const btn = e.target.closest('.chip');
+    if (!btn) return;
+    [...presetsEl.children].forEach(c => c.classList.toggle('active', c === btn));
+    durationSec = parseInt(btn.dataset.min, 10) * 60;
+    reset();
+  });
+
+  resetTallyBtn.addEventListener('click', function () {
+    setCount(0);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.code === 'Space') { e.preventDefault(); start(); }
+    if (e.key.toLowerCase() === 'r') { reset(); }
+  });
+
+  renderTally(getCount());
+  paint();
+})();
+</script>
+</body>
+</html>
