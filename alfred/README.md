@@ -1,22 +1,27 @@
 # Alfred (desktop)
 
-A personal "chief of staff" desk. The UI is `index.html` (also openable straight in a
-browser as a static tool). Wrapped in Electron it gains **real Gmail access** for
-Miles and Alfred.
+A personal "chief of staff" desk. The UI is `index.html` — it runs three ways:
+
+| How | Gmail |
+|---|---|
+| Double-click `index.html` in a browser | none (add emails by hand) |
+| Serve it (`python -m http.server`) and open `http://localhost:8000/alfred/` | **read-only** via Google sign-in (Settings → Gmail) |
+| The Electron app (below) | **full** read + send + file + delete (IMAP app-password or OAuth) |
 
 ## Run it
 
 ```bash
 cd alfred
 npm install
-npm start
+npm start          # dev run
+npm run pack       # portable build -> dist/win-unpacked/Alfred.exe  (no installer, always works)
+npm run dist       # NSIS installer -> dist/Alfred-Setup-<version>.exe
 ```
 
-Build a Windows installer (`dist/Alfred-Setup-<version>.exe`):
-
-```bash
-npm run dist
-```
+`npm run dist` needs Windows **Developer Mode** on (Settings → Privacy & security → For
+developers) or an elevated shell — electron-builder's signing tools unpack symlinks.
+Without that, use `npm run pack`: the `dist/win-unpacked/` folder is the whole app —
+move it anywhere and pin `Alfred.exe` to the taskbar.
 
 ## Connect Gmail
 

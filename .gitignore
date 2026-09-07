@@ -11,3 +11,4 @@ alfred/.env.*
 Thumbs.db
 .DS_Store
 *.log
+alfred/_*.log

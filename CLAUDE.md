@@ -136,6 +136,23 @@ renderer only ever calls `NATIVE.gmail.list/get/send/draft/modify/trash`.
 - **Voice master switch**: `#voiceToggle` / `setVoiceEnabled()` flips `settings.voice`
   (the old `#setVoice` checkbox is now a hidden state holder); `#voiceStop` calls
   `stopSpeaking()`. `speak()` already early-returns when `!settings.voice`.
+- **Browser Gmail (read-only)**: when NOT in Electron but the page is served over
+  http(s) (`SERVED`), `browserGmail` (Google Identity Services token client +
+  `gmail.readonly` REST) is used instead of the native bridge. `const GM = NATIVE ?
+  NATIVE.gmail : browserGmail` — the rest of the Gmail renderer code is transport-
+  agnostic. Settings shows `#gBrowserBlock` (just a Web client id + "Sign in with
+  Google"); writes return `DESKTOP_ONLY`; per-message buttons collapse to "open in
+  Gmail". 1-hour token, silent re-request. `file://` gets neither (`#gmailWebNote`).
+- **`store` fallback**: `localStorage` writes that throw fall back to an in-memory
+  `Map` so the session stays consistent, and warn once (`storeBlocked`), not per
+  write. `Settings → Backup & sync` exports/imports all `alfred:*` data as one JSON
+  (`#exportData` / `#importData`) — the way to line up the separate stores the
+  browser copy and the desktop app each keep.
+- **Packaging**: `npm run pack` (`electron-builder --dir`) with
+  `win.signAndEditExecutable:false` avoids the winCodeSign symlink-privilege failure
+  on stock Windows; output `dist/win-unpacked/` is the portable app. `npm run dist`
+  (NSIS installer) needs Developer Mode / elevation. `assets/alfred.ico` is a
+  PS-generated 256px icon from `alfred.png`.
 
 ## Conventions
 

@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="dark">
 <link rel="icon" href="assets/alfred.png">
 <title>Alfred</title>
+<script src="https://accounts.google.com/gsi/client" async></script>
 <style>
   /* ---------------------------------------------------------------------------
      Alfred — a personal "chief of staff" desk.
@@ -575,9 +576,17 @@
           <div class="field"><label>About the business (Alfred & Ivy use this)</label><textarea id="setBiz" placeholder="A sentence or two about the work"></textarea></div>
           <hr class="sep">
           <h2>Gmail <span class="who">Miles</span></h2>
-          <div id="gmailOnly" hidden>
-            <p class="sub" id="gmailStatus">Checking…</p>
+          <p class="sub" id="gmailStatus" hidden>Checking…</p>
 
+          <!-- browser + page served: Google sign-in (read only) -->
+          <div id="gBrowserBlock" hidden>
+            <p class="foot faint" style="margin-bottom:8px"><b>Sign in with Google</b> — lets Miles read your inbox for briefs. Needs a Google Cloud OAuth <em>Web</em> client ID (Authorized origin = this page's address). Sending and filing email are desktop-app only.</p>
+            <div class="field"><label>Google Client ID (Web)</label><input id="gWebClientId" placeholder="…apps.googleusercontent.com" autocomplete="off"></div>
+            <button class="btn primary sm" id="gWebConnect">Sign in with Google</button>
+          </div>
+
+          <!-- desktop app: IMAP / OAuth -->
+          <div id="gmailOnly" hidden>
             <div id="gImapBlock">
               <p class="foot faint" style="margin-bottom:8px"><b>Link with an App Password</b> — the simple way, no Google Cloud project. Turn on 2-Step Verification for your Google account, then <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener">create an App Password</a> and paste the 16-character code below. The moment you link it, Miles and Alfred can read your mail.</p>
               <div class="field"><label>Gmail address</label><input id="gImapUser" type="email" placeholder="you@gmail.com" autocomplete="off"></div>
@@ -596,17 +605,20 @@
                 </div>
               </div>
             </details>
+          </div>
 
+          <!-- shared controls (both modes) -->
+          <div id="gmailShared" hidden>
             <button class="btn ghost sm danger" id="gDisconnect" hidden style="margin-top:12px">Disconnect Gmail</button>
-
             <div class="row" style="margin-top:12px">
               <div class="field" id="gQueryField"><label>Search / filter</label><input id="gQuery" placeholder="in:inbox"></div>
               <div class="field"><label>How many emails</label><input id="gMax" type="number" min="5" max="100" placeholder="25"></div>
             </div>
             <label class="toggle" style="margin-top:6px"><input type="checkbox" id="gAiAlways"> Let Alfred send email text to the AI without asking each time</label>
-            <p class="foot faint" style="margin-top:8px">Credentials stay on this machine, encrypted. Every send, label, or delete asks first.</p>
+            <p class="foot faint" style="margin-top:8px">Credentials stay on this device. In the desktop app every send / label / delete asks first.</p>
           </div>
-          <p class="sub" id="gmailWebNote">Gmail connects only in the Alfred desktop app. In a browser you can still add or paste emails by hand.</p>
+
+          <p class="sub" id="gmailWebNote">Gmail needs the desktop app, or this page served from a local web server. Opened straight from a file, you can still add emails by hand.</p>
           <hr class="sep">
           <h2>Voice</h2>
           <input type="checkbox" id="setVoice" hidden>
@@ -652,8 +664,18 @@
         </div>
       </div>
       <div class="panel" style="margin-top:16px">
+        <h2>Backup &amp; sync</h2>
+        <p class="sub">Each copy of Alfred (browser, desktop app) keeps its own data. Export here, import in the other to line them up.</p>
+        <div class="inline">
+          <button class="btn sm" id="exportData">Export a backup file</button>
+          <button class="btn sm" id="importData">Import a backup file</button>
+          <input type="file" id="importFile" accept="application/json" hidden>
+        </div>
+        <p class="foot faint" id="backupNote" style="margin-top:8px">Includes your settings, orders, saved emails, ideas and chat. API keys are included — keep the file private.</p>
+      </div>
+      <div class="panel" style="margin-top:16px">
         <h2>Danger zone</h2>
-        <p class="sub">Wipes orders, emails, ideas, chat history and settings from this browser.</p>
+        <p class="sub">Wipes orders, emails, ideas, chat history and settings from this copy of Alfred.</p>
         <button class="btn danger" id="wipeAll">Erase everything</button>
       </div>
     </section>
@@ -696,14 +718,31 @@
     return Math.round((d - n) / 86400000);
   };
 
+  // localStorage, with an in-memory fallback so the app still works for the
+  // session when the browser blocks site data — and it only warns once.
+  const mem = new Map();
+  let storeBlocked = false;
   const store = {
-    get(k, fb) { try { const v = localStorage.getItem("alfred:" + k); return v == null ? fb : JSON.parse(v); } catch { return fb; } },
-    set(k, v) { try { localStorage.setItem("alfred:" + k, JSON.stringify(v)); } catch (e) { fixCard("Couldn't save to this browser", [
-      "Your browser is blocking local storage (often private-browsing mode).",
-      "Open Alfred in a normal window, or allow site data for this page.",
-      "Your latest change may not survive a refresh until then."
-    ], "err"); } },
-    del(k) { try { localStorage.removeItem("alfred:" + k); } catch {} },
+    get(k, fb) {
+      try { const v = localStorage.getItem("alfred:" + k); if (v != null) return JSON.parse(v); } catch {}
+      return mem.has("alfred:" + k) ? mem.get("alfred:" + k) : fb;
+    },
+    set(k, v) {
+      mem.set("alfred:" + k, v);
+      try { localStorage.setItem("alfred:" + k, JSON.stringify(v)); }
+      catch (e) {
+        if (!storeBlocked) {
+          storeBlocked = true;
+          fixCard("This browser isn't saving Alfred's data", [
+            "Alfred works fine for now, but changes won't survive a reload here.",
+            "Usual cause: a private/incognito window, or “block all cookies / site data”.",
+            "Fix: open Alfred in a normal window and allow site data for this page, then reload.",
+            "Or use the installed desktop app — it always saves. Settings → Backup can move your setup across.",
+          ], "warn", { once: "nostore", autohide: false });
+        }
+      }
+    },
+    del(k) { mem.delete("alfred:" + k); try { localStorage.removeItem("alfred:" + k); } catch {} },
   };
 
   /* ===================================================================
@@ -719,7 +758,7 @@
     voiceMiles:  "nPczCjzI2devNBz1zQrb", // Miles   — Brian   (deep, reassuring)
     voiceOtto:   "onwK4e9ZLuTAKqWW03F9", // Otto    — Daniel  (steady broadcaster)
     voiceIvy:    "EXAVITQu4vr4xnSDxMaL", // Ivy     — Sarah   (confident, clear)
-    gmailQuery: "in:inbox", gmailMax: 25, // Gmail sync (desktop app only)
+    gmailQuery: "in:inbox", gmailMax: 25, gWebClientId: "", // Gmail sync
   }, store.get("settings", {}));
 
   const NATIVE = (typeof window !== "undefined" && window.alfredNative) || null;
@@ -1033,12 +1072,14 @@
     else {
       list.replaceChildren(...emails.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map(e => {
         const flag = isFlagged(e);
-        const acts = e.gid
+        const acts = (e.gid && NATIVE)
           ? [
               el("button", { text: "draft reply", onclick: () => gmailDraftReply(e) }),
               el("button", { text: "archive", onclick: () => gmailWrite("modify", { id: e.gid, remove: ["INBOX"], describe: `Archive "${e.subject}"?` }) }),
               el("button", { text: "trash", onclick: () => gmailWrite("trash", { id: e.gid, subject: e.subject }) }),
             ]
+          : e.gid
+          ? [ el("button", { text: "open in Gmail", onclick: () => window.open("https://mail.google.com/mail/u/0/#inbox/" + e.gid, "_blank", "noopener") }) ]
           : [
               el("button", { text: e.read ? "mark unread" : "mark read", onclick: () => { e.read = !e.read; persist(); refreshAll(); } }),
               el("button", { text: "delete", onclick: () => { emails = emails.filter(x => x.id !== e.id); persist(); refreshAll(); } }),
@@ -1093,8 +1134,13 @@
   }
 
   /* ===================================================================
-     Gmail (desktop app only — window.alfredNative provided by preload)
+     Gmail
+     - desktop app: window.alfredNative.gmail (IMAP or OAuth), read + write
+     - browser, page served over http(s): Google sign-in, read-only
+     - browser opened as a file:// : not available
   =================================================================== */
+  const SERVED = location.protocol === "http:" || location.protocol === "https:";
+
   // "Ask me per action" before any email text is sent to the Anthropic API
   let aiAlways = !!settings.aiEmailAlways;
   async function confirmAI(what) {
@@ -1103,10 +1149,82 @@
     return confirm(`Send email content to the Anthropic API to ${what}?\n\nOK = yes  ·  Cancel = keep it local this time.`);
   }
 
+  // Browser-only Gmail: Google Identity Services token client + Gmail REST.
+  // Read-only (gmail.readonly). 1-hour token, re-requested silently on expiry.
+  const browserGmail = (() => {
+    let tok = null, exp = 0, email = null;
+    function tokenClient(prompt) {
+      return new Promise((res, rej) => {
+        if (!(window.google && google.accounts && google.accounts.oauth2))
+          return rej(new Error("Google sign-in didn't load — check your connection and reload."));
+        const c = google.accounts.oauth2.initTokenClient({
+          client_id: (settings.gWebClientId || "").trim(),
+          scope: "https://www.googleapis.com/auth/gmail.readonly",
+          callback: r => r.error ? rej(new Error(r.error_description || r.error)) : res(r),
+          error_callback: err => rej(new Error(err && err.type ? err.type.replace(/_/g, " ") : "sign-in cancelled")),
+        });
+        c.requestAccessToken({ prompt: prompt == null ? "" : prompt });
+      });
+    }
+    async function token() {
+      if (tok && Date.now() < exp) return tok;
+      const r = await tokenClient(tok ? "" : "consent");
+      tok = r.access_token; exp = Date.now() + (r.expires_in - 60) * 1000;
+      return tok;
+    }
+    async function api(path) {
+      const t = await token();
+      const r = await fetch("https://gmail.googleapis.com/gmail/v1/users/me" + path, { headers: { Authorization: "Bearer " + t } });
+      const txt = await r.text(); const j = txt ? JSON.parse(txt) : {};
+      if (r.status === 401) { tok = null; throw new Error("Google session expired — sign in again."); }
+      if (!r.ok) throw new Error("Gmail " + r.status + ": " + ((j.error && j.error.message) || txt.slice(0, 120)));
+      return j;
+    }
+    const wrap = fn => async (...a) => { try { return { ok: true, data: await fn(...a) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null }; } };
+    const notHere = msg => async () => ({ ok: false, error: msg, code: "DESKTOP_ONLY" });
+    return {
+      status: async () => ({ method: "browser", connected: !!tok, email }),
+      connect: wrap(async () => {
+        if (!(settings.gWebClientId || "").trim()) { const e = new Error("Add your Web Client ID first."); e.code = "NO_CREDS"; throw e; }
+        const r = await tokenClient("consent");
+        tok = r.access_token; exp = Date.now() + (r.expires_in - 60) * 1000;
+        email = (await api("/profile")).emailAddress;
+        return { email };
+      }),
+      disconnect: async () => { try { tok && google.accounts.oauth2.revoke(tok); } catch {} tok = null; exp = 0; email = null; return { ok: true }; },
+      list: wrap(async ({ max = 25 } = {}) => {
+        const l = await api("/messages?maxResults=" + (Number(max) || 25) + "&q=" + encodeURIComponent("in:inbox"));
+        const out = [];
+        for (const { id } of (l.messages || [])) {
+          const m = await api("/messages/" + id + "?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date");
+          const h = {}; for (const x of (m.payload && m.payload.headers) || []) h[x.name.toLowerCase()] = x.value;
+          out.push({ id: m.id, threadId: m.threadId, from: h.from || "", subject: h.subject || "(no subject)", date: h.date || "", snippet: m.snippet || "", unread: (m.labelIds || []).includes("UNREAD"), labelIds: m.labelIds || [] });
+        }
+        return out;
+      }),
+      get: wrap(async id => {
+        const m = await api("/messages/" + id + "?format=full");
+        const h = {}; for (const x of (m.payload && m.payload.headers) || []) h[x.name.toLowerCase()] = x.value;
+        return { id: m.id, from: h.from, subject: h.subject, date: h.date, snippet: m.snippet, body: m.snippet || "" };
+      }),
+      send:   notHere("Sending email is only available in the Alfred desktop app."),
+      draft:  notHere("Saving drafts is only available in the Alfred desktop app."),
+      modify: notHere("Filing email is only available in the Alfred desktop app."),
+      trash:  notHere("Deleting email is only available in the Alfred desktop app."),
+    };
+  })();
+
+  const GM = NATIVE ? NATIVE.gmail : browserGmail;
+
   function gmailFix(msg, code) {
     const steps = {
-      NO_CREDS: ["Open Settings → Gmail.", "Paste the Client ID and Client secret from your Google Cloud project (APIs & Services → Credentials → your OAuth client).", "Press Save, then Connect Gmail."],
-      NOT_CONNECTED: ["Open Settings → Gmail and link your account — either an App Password (simple) or the advanced Google sign-in.", "Then try again."],
+      NO_CREDS: [
+        "Open Settings → Gmail and add your Google OAuth client ID.",
+        "Get it at console.cloud.google.com → APIs & Services → Credentials. In the browser use a 'Web application' client and add this page's address (e.g. http://localhost:8000) as an Authorized JavaScript origin. In the desktop app use a 'Desktop app' client.",
+        "Enable the Gmail API for the project, then try again.",
+      ],
+      DESKTOP_ONLY: ["That action needs the Alfred desktop app — the browser version is read-only for Gmail.", "Install / open the desktop app and link Gmail there to send, draft, file or delete."],
+      NOT_CONNECTED: ["Open Settings → Gmail and link your account — App Password (desktop, simplest), advanced OAuth (desktop), or Sign in with Google (browser).", "Then try again."],
       TOKEN_EXPIRED: ["Google signed Alfred out (this happens if the consent screen is still in 'Testing' — tokens last 7 days there).", "In the Google Cloud console → OAuth consent screen → press 'Publish app' / set it to 'In production'.", "Back in Alfred: Settings → Gmail → Connect via Google again."],
       IMAP_AUTH: [
         "Turn on 2-Step Verification: myaccount.google.com → Security → 2-Step Verification.",
@@ -1131,7 +1249,7 @@
 
   async function gmailSync(quiet) {
     if (!gmailConnected) return;
-    const res = await NATIVE.gmail.list({ q: settings.gmailQuery || "in:inbox", max: Number(settings.gmailMax) || 25 });
+    const res = await GM.list({ q: settings.gmailQuery || "in:inbox", max: Number(settings.gmailMax) || 25 });
     if (!res.ok) { gmailFix(res.error, res.code); return; }
     // replace Gmail-sourced emails, keep any hand-added ones
     const manual = emails.filter(e => !e.gid);
@@ -1176,34 +1294,64 @@
   }
 
   async function gmailBoot() {
-    $("#gmailOnly").hidden = false;
-    $("#gmailWebNote").hidden = true;
+    $("#gWebClientId").value = settings.gWebClientId || "";
     $("#gQuery").value = settings.gmailQuery || "in:inbox";
     $("#gMax").value = Number(settings.gmailMax) || 25;
     $("#gAiAlways").checked = aiAlways;
+
+    if (!NATIVE && !SERVED) {
+      // opened as a file — Gmail can't work here
+      ["#gBrowserBlock", "#gmailOnly", "#gmailShared", "#gmailStatus"].forEach(s => $(s).hidden = true);
+      $("#gmailWebNote").hidden = false;
+      return;
+    }
+    $("#gmailWebNote").hidden = true;
+    $("#gmailStatus").hidden = false;
+
     let st;
-    try { st = await NATIVE.gmail.status(); } catch (e) { st = { connected: false }; }
+    try { st = await GM.status(); } catch { st = { connected: false }; }
     gmailConnected = !!st.connected;
     const setup = !st.connected;
-    $("#gImapBlock").hidden = !setup;
-    $("#gOauthBlock").hidden = !setup;
+
+    $("#gBrowserBlock").hidden = NATIVE || !setup;
+    $("#gmailOnly").hidden = !NATIVE || !setup;
+    $("#gmailShared").hidden = false;
     $("#gDisconnect").hidden = setup;
     $("#gmailSyncBtn").hidden = setup;
     $("#gmailBar").hidden = setup;
-    $("#gQueryField").hidden = st.method === "imap";
+    $("#gQueryField").hidden = st.method === "imap" || st.method === "browser";
+
     $("#gmailStatus").textContent = st.connected
-      ? (st.method === "imap" ? "Linked to " + st.email + " over IMAP." : "Signed in as " + st.email + " (Google OAuth).")
-      : st.expired ? "Google signed Alfred out — link again below."
-      : st.creds ? "OAuth credentials saved. Open the advanced section and press Connect via Google."
-      : "Not linked yet. Add an App Password below (or use the advanced OAuth option).";
+      ? (st.method === "imap"    ? "Linked to " + st.email + " over IMAP."
+       : st.method === "browser" ? "Signed in as " + st.email + " — read-only in the browser."
+       :                           "Signed in as " + st.email + " (Google OAuth).")
+      : NATIVE
+        ? (st.expired ? "Google signed Alfred out — link again below."
+         : st.creds   ? "OAuth credentials saved. Open the advanced section and press Connect via Google."
+         :              "Not linked yet. Add an App Password below (or use the advanced OAuth option).")
+        : "Sign in with Google to let Miles read your inbox.";
+
     if (st.connected) {
-      $("#gmailBar").textContent = "📬 Live from " + st.email + " — every send / label / delete asks first.";
+      $("#gmailBar").textContent = "📬 Live from " + st.email + (NATIVE ? " — every send / label / delete asks first." : " — read-only here.");
       emails = emails.filter(e => !e.sample); // real inbox replaces the demo emails
       await gmailSync(true);
     }
   }
-  if (NATIVE) {
+
+  if (NATIVE || SERVED) {
+    // shared controls
     $("#gmailSyncBtn").addEventListener("click", () => gmailSync(false));
+    $("#gDisconnect").addEventListener("click", async () => {
+      if (!confirm("Disconnect Gmail from this copy of Alfred?")) return;
+      await GM.disconnect();
+      emails = emails.filter(e => !e.gid); gmailConnected = false; persist(); refreshAll();
+      gmailBoot();
+    });
+    $("#gQuery").addEventListener("change", e => { settings.gmailQuery = e.target.value.trim() || "in:inbox"; persist(); });
+    $("#gMax").addEventListener("change", e => { settings.gmailMax = Math.max(5, Math.min(100, Number(e.target.value) || 25)); persist(); });
+    $("#gAiAlways").addEventListener("change", e => { aiAlways = e.target.checked; settings.aiEmailAlways = aiAlways; persist(); });
+  }
+  if (NATIVE) {
     $("#gImapConnect").addEventListener("click", async () => {
       const user = $("#gImapUser").value.trim();
       const pass = $("#gImapPass").value;
@@ -1230,15 +1378,20 @@
       if (!r.ok) { gmailFix(r.error, r.code); $("#gmailStatus").textContent = "Connection failed."; return; }
       gmailBoot();
     });
-    $("#gDisconnect").addEventListener("click", async () => {
-      if (!confirm("Disconnect Gmail and forget the credentials on this machine?")) return;
-      await NATIVE.gmail.disconnect();
-      emails = emails.filter(e => !e.gid); gmailConnected = false; persist(); refreshAll();
-      gmailBoot();
+  }
+  if (!NATIVE && SERVED) {
+    $("#gWebClientId").addEventListener("input", e => { settings.gWebClientId = e.target.value.trim(); persist(); });
+    $("#gWebConnect").addEventListener("click", async () => {
+      if (!(settings.gWebClientId || "").trim()) { gmailFix("Add your Google Web Client ID first.", "NO_CREDS"); return; }
+      $("#gmailStatus").textContent = "Opening Google sign-in…";
+      const r = await GM.connect();
+      if (!r.ok) { gmailFix(r.error, r.code); $("#gmailStatus").textContent = "Sign-in failed — see the note."; return; }
+      await gmailBoot();
+      fixCard("Signed in to Gmail — " + ((r.data && r.data.email) || ""),
+        ["Miles can read your inbox now (read-only in the browser — sending/filing is desktop-app only).",
+         "Try “Brief me” on the Inbox tab.",
+         "Heads up: the browser session lasts about an hour, then Google asks again."], "info", { once: "gmail-web" });
     });
-    $("#gQuery").addEventListener("change", e => { settings.gmailQuery = e.target.value.trim() || "in:inbox"; persist(); });
-    $("#gMax").addEventListener("change", e => { settings.gmailMax = Math.max(5, Math.min(100, Number(e.target.value) || 25)); persist(); });
-    $("#gAiAlways").addEventListener("change", e => { aiAlways = e.target.checked; settings.aiEmailAlways = aiAlways; persist(); });
   }
   function localBrief() {
     const unread = emails.filter(e => !e.read);
@@ -1903,6 +2056,29 @@
     location.reload();
   });
 
+  // --- Backup: export / import all Alfred data as one JSON file ---
+  const BACKUP_KEYS = ["settings", "orders", "emails", "ideas", "chat"];
+  $("#exportData").addEventListener("click", () => {
+    const dump = { _alfred: 1, exportedAt: new Date().toISOString() };
+    for (const k of BACKUP_KEYS) dump[k] = store.get(k, null);
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
+    const a = el("a", { href: URL.createObjectURL(blob), download: "alfred-backup-" + todayISO() + ".json" });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+  $("#importData").addEventListener("click", () => $("#importFile").click());
+  $("#importFile").addEventListener("change", async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    let data;
+    try { data = JSON.parse(await file.text()); }
+    catch { fixCard("That file isn't a valid Alfred backup", ["It should be a .json file exported from Alfred's Settings → Backup."], "warn"); return; }
+    if (!data || !data._alfred) { fixCard("That doesn't look like an Alfred backup", ["Pick a file exported with “Export a backup file”."], "warn"); return; }
+    if (!confirm("Replace this copy's data with the backup? Current data here will be overwritten.")) return;
+    for (const k of BACKUP_KEYS) if (data[k] != null) store.set(k, data[k]);
+    location.reload();
+  });
+
   /* ===================================================================
      Mode chip + nav badges
   =================================================================== */
@@ -1929,7 +2105,7 @@
   renderChat();
   refreshAll();
   go(store.get("tab", "alfred"));
-  if (NATIVE) gmailBoot();
+  if (NATIVE || SERVED) gmailBoot();
 
   // greet — once we know voices are likely ready
   function bootGreeting() {

@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "description": "Alfred — a personal chief-of-staff desk with real Gmail access",
+  "author": "Alfred",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "pack": "electron-builder --dir",
     "dist": "electron-builder --win"
   },
   "dependencies": {
@@ -20,15 +22,26 @@
   "build": {
     "appId": "com.alfred.desk",
     "productName": "Alfred",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/imapflow/**",
+      "node_modules/mailparser/**",
+      "node_modules/nodemailer/**"
+    ],
     "files": [
       "main.js",
       "preload.js",
       "index.html",
-      "assets/**/*"
+      "assets/**/*",
+      "node_modules/**/*",
+      "!**/_*.log",
+      "!.env",
+      "!.env.*"
     ],
     "win": {
-      "target": "nsis",
-      "icon": "assets/alfred.png"
+      "target": "dir",
+      "icon": "assets/alfred.ico",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
