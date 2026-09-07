@@ -1,0 +1,1717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Alfred</title>
+<style>
+  /* ---------------------------------------------------------------------------
+     Alfred — a personal "chief of staff" desk.
+     Single static file. No build, no deps, no server. All state in localStorage.
+     Committed dark navy theme — this product is a console, not a document, so it
+     ignores the OS light/dark setting and stays dark. Cyan is the one accent.
+  --------------------------------------------------------------------------- */
+  :root {
+    --bg:            #0b1322;   /* base navy */
+    --bg-2:          #0f1a2d;   /* input wells / recessed */
+    --panel:         rgba(20,32,54,.72);
+    --panel-solid:   #14223a;
+    --panel-2:       rgba(28,42,68,.55);
+    --line:          rgba(120,165,225,.13);
+    --line-strong:   rgba(132,182,236,.30);
+    --text:          #dbe6f5;
+    --text-dim:      #93a6c6;
+    --text-faint:    #63789c;
+    --accent:        #57c6ff;
+    --accent-2:      #2f83d4;
+    --accent-ink:    #04121d;
+    --glow:          rgba(87,198,255,.32);
+    --warn:          #ffd166;
+    --danger:        #ff6b6b;
+    --ok:            #4fd08a;
+    --radius:        14px;
+    --radius-sm:     9px;
+    --font:  ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono:  ui-monospace, "SF Mono", "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+    --shadow: 0 2px 10px rgba(0,0,0,.45), 0 24px 70px rgba(0,0,0,.55);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 700px at 80% -12%, rgba(47,131,212,.12), transparent 60%),
+      radial-gradient(900px 600px at 8% 112%, rgba(87,198,255,.07), transparent 55%),
+      var(--bg);
+    background-attachment: fixed;
+    color: var(--text);
+    font: 15px/1.55 var(--font);
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  input, textarea, select { font: inherit; color: inherit; }
+  ::placeholder { color: var(--text-faint); }
+
+  /* ---- App shell ---------------------------------------------------------- */
+  .app {
+    display: grid;
+    grid-template-columns: 210px 1fr;
+    min-height: 100vh;
+  }
+  .rail {
+    border-right: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(20,32,54,.5), rgba(20,32,54,.12));
+    padding: 18px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 8px 16px;
+  }
+  .brand .mark {
+    width: 30px; height: 30px; flex: none;
+    border-radius: 8px;
+    background: radial-gradient(circle at 30% 30%, var(--accent), var(--accent-2) 70%);
+    box-shadow: 0 0 18px var(--glow);
+    display: grid; place-items: center;
+    color: var(--accent-ink); font-weight: 800; font-size: 15px;
+  }
+  .brand b { font-size: 15px; letter-spacing: .3px; }
+  .brand span { display: block; font-size: 11px; color: var(--text-dim); font-weight: 500; }
+
+  .navbtn {
+    display: flex; align-items: center; gap: 11px;
+    width: 100%;
+    padding: 10px 11px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-dim);
+    text-align: left;
+    transition: background .14s, color .14s, border-color .14s;
+  }
+  .navbtn .ico { width: 18px; flex: none; text-align: center; opacity: .9; }
+  .navbtn .lbl { font-weight: 600; font-size: 13.5px; }
+  .navbtn .tag {
+    margin-left: auto; font-size: 11px; font-weight: 700;
+    background: var(--accent); color: var(--accent-ink);
+    border-radius: 999px; padding: 1px 7px; min-width: 18px; text-align: center;
+  }
+  .navbtn:hover { background: var(--panel-2); color: var(--text); }
+  .navbtn.active {
+    background: linear-gradient(90deg, rgba(87,198,255,.16), rgba(87,198,255,.03));
+    border-color: var(--line-strong);
+    color: var(--text);
+  }
+  .rail .spacer { flex: 1; }
+  .rail .foot { font-size: 11px; color: var(--text-faint); padding: 8px; }
+
+  .main { min-width: 0; padding: 22px clamp(16px, 4vw, 40px) 60px; }
+
+  /* ---- Top greeting bar ------------------------------------------------- */
+  .topbar {
+    display: flex; align-items: center; gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 22px;
+  }
+  .greet h1 {
+    margin: 0; font-size: clamp(20px, 3vw, 27px); font-weight: 700; letter-spacing: .2px;
+  }
+  .greet p { margin: 3px 0 0; color: var(--text-dim); font-size: 13.5px; min-height: 1.2em; }
+  .topbar .right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .chip {
+    font-size: 12px; font-weight: 700; letter-spacing: .3px;
+    padding: 6px 11px; border-radius: 999px;
+    border: 1px solid var(--line-strong); color: var(--text-dim);
+    background: var(--panel);
+    white-space: nowrap;
+  }
+  .chip.live { color: var(--ok); border-color: rgba(79,208,138,.5); }
+  .iconbtn {
+    width: 36px; height: 36px; border-radius: 10px;
+    border: 1px solid var(--line-strong); background: var(--panel);
+    display: grid; place-items: center; font-size: 15px;
+    transition: background .14s, transform .1s;
+  }
+  .iconbtn:hover { background: var(--panel-2); }
+  .iconbtn:active { transform: scale(.94); }
+
+  /* ---- Panels / cards ------------------------------------------------- */
+  .grid { display: grid; gap: 16px; }
+  .cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 900px) { .cols-2, .cols-3 { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 18px;
+    backdrop-filter: blur(6px);
+  }
+  .panel > h2 {
+    margin: 0 0 4px; font-size: 14px; font-weight: 700; letter-spacing: .3px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel > h2 .who {
+    font-size: 11px; font-weight: 700; color: var(--accent);
+    border: 1px solid var(--line-strong); border-radius: 999px; padding: 1px 8px;
+  }
+  .panel .sub { margin: 0 0 14px; color: var(--text-dim); font-size: 12.5px; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 9px 15px; border-radius: 10px;
+    border: 1px solid var(--line-strong);
+    background: var(--panel-2); color: var(--text);
+    font-weight: 650; font-size: 13px;
+    transition: background .14s, border-color .14s, transform .1s;
+  }
+  .btn:hover { background: var(--panel-solid); }
+  .btn:active { transform: scale(.98); }
+  .btn.primary {
+    background: linear-gradient(180deg, var(--accent), var(--accent-2));
+    border-color: transparent; color: var(--accent-ink);
+    box-shadow: 0 0 20px var(--glow);
+  }
+  .btn.ghost { background: transparent; }
+  .btn.sm { padding: 6px 10px; font-size: 12px; }
+  .btn.danger { color: var(--danger); border-color: rgba(255,107,107,.4); }
+  .btn[disabled] { opacity: .5; pointer-events: none; }
+
+  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+  .field label { font-size: 12px; font-weight: 650; color: var(--text-dim); }
+  .field input, .field textarea, .field select {
+    background: var(--bg-2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    padding: 9px 11px;
+    outline: none;
+    transition: border-color .14s, box-shadow .14s;
+  }
+  .field input:focus, .field textarea:focus, .field select:focus {
+    border-color: var(--accent); box-shadow: 0 0 0 3px var(--glow);
+  }
+  .field textarea { resize: vertical; min-height: 68px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 130px; }
+  .inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  .muted { color: var(--text-dim); }
+  .faint { color: var(--text-faint); }
+  .empty {
+    text-align: center; color: var(--text-faint);
+    padding: 26px 14px; font-size: 13px;
+    border: 1px dashed var(--line-strong); border-radius: var(--radius-sm);
+  }
+
+  /* ---- Tabs (sections) ---------------------------------------------------- */
+  .tab[hidden] { display: none; }
+  .tab { animation: rise .28s ease both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+  @media (prefers-reduced-motion: reduce) { .tab { animation: none; } }
+
+  /* ---- HUD ring --------------------------------------------------------- */
+  .hud-wrap { display: grid; place-items: center; padding: 6px 0; position: relative; }
+  .hud { width: min(340px, 74vw); aspect-ratio: 1; display: block; overflow: visible; }
+  .hud .spin      { animation: spin 26s linear infinite; transform-origin: 150px 150px; }
+  .hud .spin-rev  { animation: spin 40s linear infinite reverse; transform-origin: 150px 150px; }
+  .hud .pulse     { animation: pulse 3.6s ease-in-out infinite; transform-origin: 150px 150px; }
+  @keyframes spin  { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100% { opacity: .5; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .hud .spin, .hud .spin-rev, .hud .pulse { animation: none; }
+  }
+  .hud-center {
+    position: absolute; inset: 0; display: grid; place-items: center;
+    text-align: center; pointer-events: none;
+  }
+  .hud-center .big { font-size: 26px; font-weight: 800; letter-spacing: .5px; }
+  .hud-center .lil { font-size: 11px; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase; }
+
+  .stars span {
+    position: absolute; width: 2px; height: 2px; border-radius: 50%;
+    background: var(--accent); opacity: .5;
+    animation: tw 3s ease-in-out infinite;
+  }
+  @keyframes tw { 50% { opacity: .1; } }
+  @media (prefers-reduced-motion: reduce) { .stars span { animation: none; } }
+
+  /* ---- Metric readouts ------------------------------------------------- */
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+  .metric {
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 12px 13px; background: var(--panel-2);
+  }
+  .metric .k { font-size: 11px; letter-spacing: .6px; text-transform: uppercase; color: var(--text-dim); }
+  .metric .v { font-size: 22px; font-weight: 800; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .metric .d { font-size: 11.5px; margin-top: 2px; }
+  .up { color: var(--ok); } .down { color: var(--danger); }
+
+  /* ---- Chat ---------------------------------------------------------- */
+  .chat {
+    display: flex; flex-direction: column;
+    height: min(60vh, 520px);
+  }
+  .chat-log {
+    flex: 1; overflow-y: auto; padding: 4px 2px 10px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .msg { display: flex; gap: 10px; max-width: 88%; }
+  .msg .av {
+    width: 26px; height: 26px; border-radius: 7px; flex: none;
+    display: grid; place-items: center; font-size: 12px; font-weight: 800;
+  }
+  .msg.alfred .av { background: radial-gradient(circle at 30% 30%, var(--accent), var(--accent-2)); color: var(--accent-ink); }
+  .msg.me { align-self: flex-end; flex-direction: row-reverse; }
+  .msg.me .av { background: var(--panel-solid); border: 1px solid var(--line-strong); color: var(--text-dim); }
+  .msg .bubble {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 12px; padding: 9px 12px; font-size: 13.5px;
+  }
+  .msg.me .bubble { background: linear-gradient(180deg, rgba(87,198,255,.16), rgba(87,198,255,.05)); border-color: var(--line-strong); }
+  .msg .bubble p { margin: 0 0 6px; } .msg .bubble p:last-child { margin: 0; }
+  .msg .bubble ul { margin: 4px 0; padding-left: 18px; }
+  .msg .bubble code { font: 12px/1.4 var(--mono); background: rgba(0,0,0,.25); padding: 1px 5px; border-radius: 5px; }
+  .typing .bubble { color: var(--text-dim); font-style: italic; }
+
+  .composer { display: flex; gap: 8px; align-items: flex-end; padding-top: 10px; border-top: 1px solid var(--line); }
+  .composer textarea {
+    flex: 1; resize: none; min-height: 42px; max-height: 140px;
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    border-radius: 10px; padding: 10px 12px; outline: none;
+  }
+  .composer textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--glow); }
+
+  .quick { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
+  .quick button {
+    font-size: 12px; padding: 6px 11px; border-radius: 999px;
+    border: 1px solid var(--line-strong); background: var(--panel-2); color: var(--text-dim);
+  }
+  .quick button:hover { color: var(--text); background: var(--panel-solid); }
+
+  /* ---- Lists (orders / emails / ideas) --------------------------------- */
+  .list { display: flex; flex-direction: column; gap: 9px; }
+  .item {
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    padding: 11px 13px; background: var(--panel-2);
+    display: grid; gap: 4px;
+  }
+  .item .line1 { display: flex; align-items: center; gap: 8px; }
+  .item .t { font-weight: 700; font-size: 13.5px; }
+  .item .meta { font-size: 12px; color: var(--text-dim); }
+  .item .acts { margin-left: auto; display: flex; gap: 6px; }
+  .item .acts button {
+    background: transparent; border: 1px solid var(--line-strong);
+    border-radius: 7px; padding: 3px 8px; font-size: 11.5px; color: var(--text-dim);
+  }
+  .item .acts button:hover { color: var(--text); }
+  .pill {
+    font-size: 11px; font-weight: 800; letter-spacing: .3px;
+    padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+    border: 1px solid var(--line-strong); color: var(--text-dim);
+  }
+  .pill.ok { color: var(--ok); border-color: rgba(79,208,138,.45); }
+  .pill.warn { color: var(--warn); border-color: rgba(255,209,102,.45); }
+  .pill.danger { color: var(--danger); border-color: rgba(255,107,107,.45); }
+  .pill.dim { opacity: .6; }
+  .dot-unread { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; box-shadow: 0 0 8px var(--glow); }
+
+  /* ---- Fix cards (something went wrong) ------------------------------- */
+  .fixstack {
+    position: fixed; right: 16px; bottom: 16px; z-index: 50;
+    display: flex; flex-direction: column; gap: 10px;
+    width: min(380px, calc(100vw - 32px));
+  }
+  .fix {
+    background: var(--panel-solid); border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--warn);
+    border-radius: 12px; padding: 13px 14px; box-shadow: var(--shadow);
+    animation: rise .2s ease both;
+  }
+  .fix.err { border-left-color: var(--danger); }
+  .fix.info { border-left-color: var(--accent); }
+  .fix h4 { margin: 0 0 6px; font-size: 13px; display: flex; align-items: center; gap: 7px; }
+  .fix h4 .x { margin-left: auto; background: transparent; border: 0; color: var(--text-dim); font-size: 16px; line-height: 1; }
+  .fix ol { margin: 6px 0 0; padding-left: 20px; font-size: 12.5px; color: var(--text-dim); }
+  .fix ol li { margin: 3px 0; }
+  .fix .foot { margin-top: 8px; font-size: 11.5px; color: var(--text-faint); }
+
+  /* ---- Misc ---------------------------------------------------------- */
+  .toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-dim); }
+  .toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .kbd { font: 11px var(--mono); border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; color: var(--text-dim); }
+  hr.sep { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }
+  .scroll-x { overflow-x: auto; }
+
+  @media (max-width: 720px) {
+    .app { grid-template-columns: 1fr; }
+    .rail {
+      position: sticky; top: 0; height: auto; flex-direction: row;
+      overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--line);
+      z-index: 20;
+    }
+    .brand { display: none; }
+    .rail .spacer, .rail .foot { display: none; }
+    .navbtn { flex-direction: column; gap: 3px; padding: 8px 10px; }
+    .navbtn .lbl { font-size: 10.5px; }
+    .navbtn .tag { position: absolute; margin: 0; transform: translate(14px,-8px); }
+    .navbtn { position: relative; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <nav class="rail" id="rail">
+    <div class="brand">
+      <div class="mark">A</div>
+      <div><b>Alfred</b><span>your desk</span></div>
+    </div>
+    <button class="navbtn active" data-go="alfred"><span class="ico">◆</span><span class="lbl">Alfred</span></button>
+    <button class="navbtn" data-go="inbox"><span class="ico">✉</span><span class="lbl">Inbox</span><span class="tag" data-tag="inbox" hidden>0</span></button>
+    <button class="navbtn" data-go="orders"><span class="ico">▣</span><span class="lbl">Orders</span><span class="tag" data-tag="orders" hidden>0</span></button>
+    <button class="navbtn" data-go="ideas"><span class="ico">✦</span><span class="lbl">Ideas</span></button>
+    <button class="navbtn" data-go="dash"><span class="ico">◎</span><span class="lbl">Revenue</span></button>
+    <div class="spacer"></div>
+    <button class="navbtn" data-go="settings"><span class="ico">⚙</span><span class="lbl">Settings</span></button>
+    <div class="foot">v0.1 · everything stays on this device</div>
+  </nav>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="greet">
+        <h1 id="greetLine">Good day.</h1>
+        <p id="greetSub">Waking the team…</p>
+      </div>
+      <div class="right">
+        <span class="chip" id="clock">--:--</span>
+        <span class="chip" id="modeChip">Local mode</span>
+        <button class="iconbtn" id="replayVoice" title="Replay Alfred's greeting">🔊</button>
+      </div>
+    </div>
+
+    <!-- ============ ALFRED ============ -->
+    <section class="tab" data-tab="alfred">
+      <div class="grid cols-2">
+        <div class="panel">
+          <div class="hud-wrap">
+            <div id="hudSlot"></div>
+            <div class="hud-center">
+              <div class="big" id="hudBig">—</div>
+              <div class="lil">on your plate</div>
+            </div>
+          </div>
+          <div class="metrics" id="alfredMetrics"></div>
+        </div>
+
+        <div class="panel">
+          <h2>Talk to Alfred <span class="who">chief of staff</span></h2>
+          <p class="sub">He can pull from Inbox, Orders and Ideas, and hand tasks to the team.</p>
+          <div class="quick" id="quickChips">
+            <button data-q="Give me my morning brief">Morning brief</button>
+            <button data-q="Where are my orders and when do they arrive?">Order status</button>
+            <button data-q="Summarize my inbox and flag anything urgent">Summarize inbox</button>
+            <button data-q="Give me 3 business ideas I could act on this week">3 ideas</button>
+          </div>
+          <div class="chat">
+            <div class="chat-log" id="chatLog"></div>
+            <div class="composer">
+              <textarea id="chatInput" rows="1" placeholder="Ask Alfred anything…  (Enter to send)"></textarea>
+              <button class="iconbtn" id="micBtn" title="Talk to Alfred">🎙</button>
+              <button class="btn primary" id="sendBtn">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ INBOX ============ -->
+    <section class="tab" data-tab="inbox" hidden>
+      <div class="grid cols-2">
+        <div class="panel">
+          <h2>Inbox <span class="who">Miles</span></h2>
+          <p class="sub">Miles keeps the email under control and tells you what actually needs you.</p>
+          <div class="inline" style="margin-bottom:12px">
+            <button class="btn primary" id="briefBtn">Brief me</button>
+            <button class="btn ghost sm" id="addEmailToggle">+ Add email</button>
+            <button class="btn ghost sm danger" id="clearEmails">Clear all</button>
+          </div>
+          <form id="emailForm" hidden>
+            <div class="row">
+              <div class="field"><label>From</label><input name="from" placeholder="name@company.com" required></div>
+              <div class="field"><label>Received</label><input name="date" type="date"></div>
+            </div>
+            <div class="field"><label>Subject</label><input name="subject" placeholder="Subject line" required></div>
+            <div class="field"><label>Body / notes</label><textarea name="body" placeholder="Paste the email or a summary"></textarea></div>
+            <button class="btn primary sm" type="submit">Save email</button>
+          </form>
+          <div class="list" id="emailList" style="margin-top:12px"></div>
+        </div>
+        <div class="panel">
+          <h2>Miles's brief</h2>
+          <p class="sub">A short read on what's waiting.</p>
+          <div id="briefOut" class="empty">Hit “Brief me” and Miles will summarize the inbox.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ ORDERS ============ -->
+    <section class="tab" data-tab="orders" hidden>
+      <div class="grid cols-2">
+        <div class="panel">
+          <h2>Orders <span class="who">Otto</span></h2>
+          <p class="sub">Otto tracks every order, its status and when it should land.</p>
+          <div class="inline" style="margin-bottom:12px">
+            <button class="btn primary" id="addOrderToggle">+ Add order</button>
+            <button class="btn ghost sm" id="orderRecap">Ask Otto for a recap</button>
+          </div>
+          <form id="orderForm" hidden>
+            <div class="row">
+              <div class="field"><label>Item</label><input name="item" placeholder="What was ordered" required></div>
+              <div class="field"><label>Vendor</label><input name="vendor" placeholder="Supplier / store"></div>
+            </div>
+            <div class="row">
+              <div class="field"><label>Order #</label><input name="ref" placeholder="optional"></div>
+              <div class="field"><label>Status</label>
+                <select name="status">
+                  <option>Ordered</option><option>Shipped</option><option>In transit</option>
+                  <option>Out for delivery</option><option>Delivered</option><option>Delayed</option>
+                </select>
+              </div>
+            </div>
+            <div class="row">
+              <div class="field"><label>Shipped on</label><input name="shipped" type="date"></div>
+              <div class="field"><label>Expected (ETA)</label><input name="eta" type="date"></div>
+            </div>
+            <div class="field"><label>Tracking link</label><input name="track" placeholder="https://…"></div>
+            <div class="field"><label>Notes</label><input name="notes" placeholder="optional"></div>
+            <button class="btn primary sm" type="submit">Save order</button>
+          </form>
+          <div class="list" id="orderList" style="margin-top:12px"></div>
+        </div>
+        <div class="panel">
+          <h2>Otto's recap</h2>
+          <p class="sub">Sorted by what arrives next.</p>
+          <div id="recapOut" class="empty">Add an order or press “Ask Otto for a recap”.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ IDEAS ============ -->
+    <section class="tab" data-tab="ideas" hidden>
+      <div class="grid cols-2">
+        <div class="panel">
+          <h2>Business ideas <span class="who">Ivy</span></h2>
+          <p class="sub">Ivy turns your context into moves you can actually make.</p>
+          <div class="field">
+            <label>What should Ivy know about the business?</label>
+            <textarea id="ideaCtx" placeholder="e.g. I wholesale phone accessories to small shops; mom handles customer service for a home-goods brand"></textarea>
+          </div>
+          <button class="btn primary" id="genIdeas">Generate ideas</button>
+          <div id="ideaOut" class="list" style="margin-top:12px"></div>
+        </div>
+        <div class="panel">
+          <h2>Product simplifier <span class="who">Ivy</span></h2>
+          <p class="sub">Paste a product / SKU list — Ivy suggests what to cut, bundle or push.</p>
+          <div class="field"><textarea id="prodList" placeholder="One product per line, e.g.&#10;Blue case - 20 units&#10;Clear case - 200 units&#10;Charger 1m&#10;Charger 2m"></textarea></div>
+          <button class="btn primary" id="simplify">Simplify</button>
+          <div id="simplifyOut" class="empty" style="margin-top:12px">Ivy will review the list and give you a shortlist.</div>
+          <hr class="sep">
+          <h2 style="margin-bottom:8px">Saved ideas</h2>
+          <div class="list" id="savedIdeas"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ REVENUE / DASHBOARD ============ -->
+    <section class="tab" data-tab="dash" hidden>
+      <div class="panel">
+        <h2>Revenue <span class="who">RevenueCat</span></h2>
+        <p class="sub" id="dashNote">Sample figures. Connect RevenueCat in Settings to pull the real numbers.</p>
+        <div class="grid cols-2" style="align-items:center">
+          <div class="hud-wrap">
+            <div class="stars" id="dashStars"></div>
+            <div id="dashHudSlot"></div>
+            <div class="hud-center">
+              <div class="big" id="dashBig">$0</div>
+              <div class="lil">monthly recurring</div>
+            </div>
+          </div>
+          <div class="metrics" id="dashMetrics"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SETTINGS ============ -->
+    <section class="tab" data-tab="settings" hidden>
+      <div class="grid cols-2">
+        <div class="panel">
+          <h2>You</h2>
+          <div class="field"><label>What should Alfred call you?</label><input id="setName" placeholder="e.g. Alex"></div>
+          <div class="field"><label>About the business (Alfred & Ivy use this)</label><textarea id="setBiz" placeholder="A sentence or two about the work"></textarea></div>
+          <hr class="sep">
+          <h2>Voice</h2>
+          <label class="toggle"><input type="checkbox" id="setVoice"> Alfred speaks (greeting + replies read aloud)</label>
+          <div class="field" style="margin-top:10px"><label>Browser voice</label>
+            <select id="setBrowserVoice"><option value="">Default</option></select>
+          </div>
+          <button class="btn sm" id="testVoice">Test voice</button>
+        </div>
+
+        <div class="panel">
+          <h2>Alfred's brain <span class="who">Claude</span></h2>
+          <p class="sub">Without a key, Alfred runs a capable offline brain over your own data. Add a key and he answers freely.</p>
+          <div class="field"><label>Anthropic API key</label><input id="setAnthropic" type="password" placeholder="sk-ant-…" autocomplete="off"></div>
+          <div class="field"><label>Model</label><input id="setModel" placeholder="claude-sonnet-5"></div>
+          <p class="foot faint">Stored only in this browser. Calls go straight from this page to Anthropic. Use a key with a low spending cap.</p>
+          <hr class="sep">
+          <h2>ElevenLabs voices</h2>
+          <div class="field"><label>ElevenLabs API key</label><input id="setEleven" type="password" placeholder="sk_…" autocomplete="off"></div>
+          <div class="inline" style="margin-bottom:10px">
+            <button class="btn sm" id="loadEleven">Load my voices</button>
+            <button class="btn sm" id="testEleven">Hear all four</button>
+          </div>
+          <p class="foot faint" style="margin-bottom:14px">Each teammate gets their own voice. Free ElevenLabs plans can use the built-in voices only — Library / custom voices need a paid plan.</p>
+          <div class="field"><label>◆ Alfred — chief of staff</label>
+            <select id="setElevenPick"><option value="">— load voices —</option></select></div>
+          <div class="field"><label>✉ Miles — Inbox</label>
+            <select id="pickMiles"><option value="">— load voices —</option></select></div>
+          <div class="field"><label>▣ Otto — Orders</label>
+            <select id="pickOtto"><option value="">— load voices —</option></select></div>
+          <div class="field"><label>✦ Ivy — Ideas</label>
+            <select id="pickIvy"><option value="">— load voices —</option></select></div>
+          <div class="field"><label>Alfred's Voice ID (manual / paste a custom one)</label>
+            <input id="setElevenVoice" placeholder="JBFqnCBsd6RMkjVDRZzb"></div>
+          <hr class="sep">
+          <h2>RevenueCat</h2>
+          <div class="field"><label>RevenueCat API key (v2, secret)</label><input id="setRC" type="password" placeholder="sk_…" autocomplete="off"></div>
+          <button class="btn sm" id="testRC">Try connecting</button>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:16px">
+        <h2>Danger zone</h2>
+        <p class="sub">Wipes orders, emails, ideas, chat history and settings from this browser.</p>
+        <button class="btn danger" id="wipeAll">Erase everything</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="fixstack" id="fixstack"></div>
+
+<script>
+"use strict";
+(function () {
+  /* ===================================================================
+     Small helpers
+  =================================================================== */
+  const $  = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const el = (tag, props = {}, kids = []) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === "class") n.className = v;
+      else if (k === "html") n.innerHTML = v;
+      else if (k === "text") n.textContent = v;
+      else if (k.startsWith("on") && typeof v === "function") n.addEventListener(k.slice(2), v);
+      else if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v);
+    }
+    (Array.isArray(kids) ? kids : [kids]).forEach(c => c != null && n.append(c.nodeType ? c : document.createTextNode(c)));
+    return n;
+  };
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+  const todayISO = () => new Date().toISOString().slice(0, 10);
+  const fmtDate = iso => {
+    if (!iso) return "";
+    const d = new Date(iso + (iso.length === 10 ? "T00:00:00" : ""));
+    if (isNaN(d)) return iso;
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  };
+  const daysBetween = iso => {
+    if (!iso) return null;
+    const d = new Date(iso + "T00:00:00"), n = new Date(todayISO() + "T00:00:00");
+    return Math.round((d - n) / 86400000);
+  };
+
+  const store = {
+    get(k, fb) { try { const v = localStorage.getItem("alfred:" + k); return v == null ? fb : JSON.parse(v); } catch { return fb; } },
+    set(k, v) { try { localStorage.setItem("alfred:" + k, JSON.stringify(v)); } catch (e) { fixCard("Couldn't save to this browser", [
+      "Your browser is blocking local storage (often private-browsing mode).",
+      "Open Alfred in a normal window, or allow site data for this page.",
+      "Your latest change may not survive a refresh until then."
+    ], "err"); } },
+    del(k) { try { localStorage.removeItem("alfred:" + k); } catch {} },
+  };
+
+  /* ===================================================================
+     State
+  =================================================================== */
+  let settings = Object.assign({
+    name: "", biz: "", voice: true, browserVoice: "",
+    anthropic: "", model: "claude-sonnet-5",
+    // Voice ids below are all built-in ElevenLabs voices (public ids, free-plan OK).
+    // Only the API key is secret. Each teammate's voice is changeable in Settings.
+    eleven: "", rc: "",
+    elevenVoice: "JBFqnCBsd6RMkjVDRZzb", // Alfred  — George  (British, warm)
+    voiceMiles:  "nPczCjzI2devNBz1zQrb", // Miles   — Brian   (deep, reassuring)
+    voiceOtto:   "onwK4e9ZLuTAKqWW03F9", // Otto    — Daniel  (steady broadcaster)
+    voiceIvy:    "EXAVITQu4vr4xnSDxMaL", // Ivy     — Sarah   (confident, clear)
+  }, store.get("settings", {}));
+
+  let orders = store.get("orders", null);
+  let emails = store.get("emails", null);
+  let ideas  = store.get("ideas", []);
+  let chat   = store.get("chat", []);
+
+  const firstRun = orders === null && emails === null;
+  if (orders === null) orders = sampleOrders();
+  if (emails === null) emails = sampleEmails();
+
+  function sampleOrders() {
+    const p = n => { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0,10); };
+    return [
+      { id: uid(), item: "Phone cases — clear, 200 ct", vendor: "ShenzhenSupply", ref: "SS-4471", status: "In transit", shipped: p(-4), eta: p(1), track: "", notes: "Sample order — edit or delete me", sample: true },
+      { id: uid(), item: "Bubble mailers, 6x9, 500 ct", vendor: "ULINE", ref: "U-88210", status: "Delivered", shipped: p(-9), eta: p(-2), track: "", notes: "", sample: true },
+      { id: uid(), item: "USB-C cables, 1m, 100 ct", vendor: "AmazonBiz", ref: "112-9930", status: "Delayed", shipped: p(-7), eta: p(-1), track: "", notes: "Carrier exception — sample", sample: true },
+    ];
+  }
+  function sampleEmails() {
+    return [
+      { id: uid(), from: "returns@bigbuyer.com", subject: "URGENT: wrong items in PO 4471", body: "Received 3 boxes of the wrong SKU. Need a fix today or we cancel the standing order.", date: todayISO(), read: false, sample: true },
+      { id: uid(), from: "newsletter@retailtrends.com", subject: "5 wholesale categories heating up this quarter", body: "Pet, kitchen, and travel accessories are up double digits...", date: todayISO(), read: false, sample: true },
+      { id: uid(), from: "mom", subject: "customer keeps calling about a refund", body: "The Henderson order. She's called twice. Can you tell me what to say?", date: todayISO(), read: true, sample: true },
+    ];
+  }
+  function uid() { return Math.random().toString(36).slice(2, 10); }
+
+  function persist() {
+    store.set("settings", settings);
+    store.set("orders", orders);
+    store.set("emails", emails);
+    store.set("ideas", ideas);
+    store.set("chat", chat.slice(-40));
+  }
+
+  /* ===================================================================
+     Fix cards — "whenever something goes wrong, step-by-step"
+  =================================================================== */
+  const shownFixKeys = new Set();
+  function fixCard(title, steps, kind = "warn", opts = {}) {
+    if (opts.once) { if (shownFixKeys.has(opts.once)) return; shownFixKeys.add(opts.once); }
+    const card = el("div", { class: "fix " + (kind === "err" ? "err" : kind === "info" ? "info" : "") }, [
+      el("h4", {}, [
+        (kind === "err" ? "✕ " : kind === "info" ? "ℹ " : "⚠ ") + title,
+        el("button", { class: "x", title: "Dismiss", onclick: () => card.remove() }, "×"),
+      ]),
+      el("ol", { html: steps.map(s => "<li>" + esc(s) + "</li>").join("") }),
+      opts.foot ? el("div", { class: "foot", text: opts.foot }) : null,
+    ]);
+    $("#fixstack").prepend(card);
+    if (opts.autohide !== false) setTimeout(() => card.remove(), 22000);
+  }
+
+  /* ===================================================================
+     Routing
+  =================================================================== */
+  function go(tab) {
+    $$(".navbtn").forEach(b => b.classList.toggle("active", b.dataset.go === tab));
+    $$(".tab").forEach(s => s.hidden = s.dataset.tab !== tab);
+    store.set("tab", tab);
+    if (tab === "dash") renderDash();
+    if (tab === "alfred") renderAlfredHome();
+  }
+  $$(".navbtn").forEach(b => b.addEventListener("click", () => go(b.dataset.go)));
+
+  /* ===================================================================
+     HUD ring (decorative SVG, reused on Alfred + Revenue tabs)
+  =================================================================== */
+  function hudSVG() {
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 300 300");
+    svg.setAttribute("class", "hud");
+    const mk = (t, a) => { const n = document.createElementNS(NS, t); for (const k in a) n.setAttribute(k, a[k]); return n; };
+    const defs = mk("defs", {});
+    defs.innerHTML =
+      '<radialGradient id="sph" cx="42%" cy="38%" r="70%">' +
+        '<stop offset="0%" stop-color="rgba(120,180,220,.28)"/>' +
+        '<stop offset="60%" stop-color="rgba(20,40,70,.15)"/>' +
+        '<stop offset="100%" stop-color="rgba(4,10,20,.55)"/>' +
+      '</radialGradient>' +
+      '<pattern id="dg" width="8" height="8" patternUnits="userSpaceOnUse">' +
+        '<circle cx="1.4" cy="1.4" r="1.1" fill="rgba(120,185,230,.30)"/>' +
+      '</pattern>';
+    svg.append(defs);
+
+    svg.append(mk("circle", { cx:150, cy:150, r:138, fill:"none", stroke:"var(--line)", "stroke-width":1 }));
+    svg.append(mk("circle", { cx:150, cy:150, r:112, fill:"none", stroke:"var(--line)", "stroke-width":1 }));
+
+    // rotating dashed outer ring
+    const g1 = mk("g", { class: "spin" });
+    g1.append(mk("circle", { cx:150, cy:150, r:130, fill:"none", stroke:"var(--accent)", "stroke-width":2,
+      "stroke-dasharray":"2 10", "stroke-linecap":"round", opacity:.7 }));
+    // a couple of bright arc accents
+    g1.append(mk("path", { d:"M150 30 A120 120 0 0 1 258 108", fill:"none", stroke:"var(--accent)", "stroke-width":3, "stroke-linecap":"round", opacity:.9 }));
+    g1.append(mk("path", { d:"M60 236 A120 120 0 0 0 96 262", fill:"none", stroke:"var(--warn)", "stroke-width":3, "stroke-linecap":"round" }));
+    svg.append(g1);
+
+    // tick ring (counter-rotating)
+    const g2 = mk("g", { class: "spin-rev" });
+    for (let i = 0; i < 60; i++) {
+      const long = i % 5 === 0;
+      const a = (i / 60) * Math.PI * 2;
+      const r1 = 100, r2 = long ? 90 : 95;
+      g2.append(mk("line", {
+        x1: 150 + Math.cos(a) * r1, y1: 150 + Math.sin(a) * r1,
+        x2: 150 + Math.cos(a) * r2, y2: 150 + Math.sin(a) * r2,
+        stroke: "var(--accent)", "stroke-width": long ? 2 : 1, opacity: long ? .8 : .35,
+      }));
+    }
+    svg.append(g2);
+
+    // inner sphere
+    svg.append(mk("circle", { cx:150, cy:150, r:76, fill:"url(#dg)" }));
+    svg.append(mk("circle", { cx:150, cy:150, r:76, fill:"url(#sph)" }));
+    svg.append(mk("circle", { cx:150, cy:150, r:76, fill:"none", stroke:"var(--line-strong)", "stroke-width":1, class:"pulse" }));
+
+    // bracket marks
+    [[0,-118],[0,118],[-118,0],[118,0]].forEach(([dx,dy]) => {
+      svg.append(mk("rect", { x:150+dx-6, y:150+dy-6, width:12, height:12, fill:"none",
+        stroke:"var(--accent)", "stroke-width":2, opacity:.6, transform:`rotate(45 ${150+dx} ${150+dy})` }));
+    });
+    return svg;
+  }
+  $("#hudSlot").append(hudSVG());
+  $("#dashHudSlot").append(hudSVG());
+  // starfield for the revenue tab
+  (() => {
+    const box = $("#dashStars");
+    for (let i = 0; i < 60; i++) {
+      box.append(el("span", { style: `left:${Math.random()*100}%;top:${Math.random()*100}%;animation-delay:${(Math.random()*3).toFixed(2)}s` }));
+    }
+  })();
+
+  /* ===================================================================
+     Greeting + clock + voice
+  =================================================================== */
+  function partOfDay(h = new Date().getHours()) {
+    return h < 12 ? "morning" : h < 18 ? "afternoon" : "evening";
+  }
+  function greetingText() {
+    const name = settings.name ? ", " + settings.name : "";
+    return `Good ${partOfDay()}${name}.`;
+  }
+  function greetingSub() {
+    const unread = emails.filter(e => !e.read).length;
+    const soon = orders.filter(o => o.status !== "Delivered" && daysBetween(o.eta) !== null && daysBetween(o.eta) <= 1).length;
+    const bits = [];
+    bits.push(unread ? `${unread} email${unread > 1 ? "s" : ""} to review` : "inbox is clear");
+    if (soon) bits.push(`${soon} order${soon > 1 ? "s" : ""} arriving soon`);
+    const late = orders.filter(o => o.status !== "Delivered" && daysBetween(o.eta) !== null && daysBetween(o.eta) < 0).length;
+    if (late) bits.push(`${late} overdue`);
+    return "Alfred here — " + bits.join(", ") + ".";
+  }
+  function renderGreeting() {
+    $("#greetLine").textContent = greetingText();
+    $("#greetSub").textContent = greetingSub();
+  }
+
+  function tickClock() {
+    $("#clock").textContent = new Date().toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  }
+  tickClock(); setInterval(tickClock, 15000);
+
+  // --- speaking (ElevenLabs when configured, else the browser) ---
+  // Each teammate has their own voice. ElevenLabs uses a per-person voice id;
+  // the browser fallback nudges rate/pitch so they still sound distinct.
+  let currentAudio = null;
+  let pendingSpeech = null;
+  function elevenVoiceFor(who) {
+    return ({ miles: settings.voiceMiles, otto: settings.voiceOtto, ivy: settings.voiceIvy }[who]) || settings.elevenVoice;
+  }
+  const BROWSER_TUNE = {
+    alfred: { rate: 1,    pitch: 1 },
+    miles:  { rate: 1.06, pitch: 1.12 },
+    otto:   { rate: 1.04, pitch: 0.88 },
+    ivy:    { rate: 1,    pitch: 1.22 },
+  };
+  function stopSpeaking() {
+    if (currentAudio) { try { currentAudio.pause(); } catch {} currentAudio = null; }
+    try { window.speechSynthesis && speechSynthesis.cancel(); } catch {}
+  }
+  async function speak(text, who = "alfred") {
+    if (!settings.voice || !text) return;
+    stopSpeaking();
+    const vid = elevenVoiceFor(who);
+    if (settings.eleven && vid) {
+      try {
+        const r = await fetch("https://api.elevenlabs.io/v1/text-to-speech/" + encodeURIComponent(vid), {
+          method: "POST",
+          headers: { "xi-api-key": settings.eleven, "content-type": "application/json" },
+          body: JSON.stringify({ text, model_id: "eleven_multilingual_v2", voice_settings: { stability: .4, similarity_boost: .8 } }),
+        });
+        if (!r.ok) { elevenError(r.status); return browserSpeak(text, who); }
+        const url = URL.createObjectURL(await r.blob());
+        const a = new Audio(url);
+        currentAudio = a;
+        await new Promise(res => {
+          a.onended = () => { URL.revokeObjectURL(url); res(); };
+          a.onerror = () => { URL.revokeObjectURL(url); res(); };
+          a.play().catch(() => { armGesture(text, who); res(); });
+        });
+        return;
+      } catch (e) {
+        fixCard("Couldn't reach ElevenLabs", [
+          "Check your internet connection.",
+          "Confirm the API key in Settings → ElevenLabs is current (elevenlabs.io/app/settings/api-keys).",
+          "The team will use the built-in browser voice for now.",
+        ], "warn", { once: "eleven-net" });
+        return browserSpeak(text, who);
+      }
+    }
+    return browserSpeak(text, who);
+  }
+  function browserSpeak(text, who = "alfred") {
+    if (!("speechSynthesis" in window)) return Promise.resolve();
+    return new Promise(res => {
+      const u = new SpeechSynthesisUtterance(text);
+      const tune = BROWSER_TUNE[who] || BROWSER_TUNE.alfred;
+      u.rate = tune.rate; u.pitch = tune.pitch;
+      const vs = speechSynthesis.getVoices();
+      const pick = settings.browserVoice && vs.find(v => v.voiceURI === settings.browserVoice);
+      if (pick) u.voice = pick;
+      u.onend = res;
+      u.onerror = () => { armGesture(text, who); res(); };
+      try { speechSynthesis.speak(u); } catch { armGesture(text, who); res(); }
+    });
+  }
+  function armGesture(text, who = "alfred") {
+    pendingSpeech = { text, who };
+    $("#replayVoice").style.boxShadow = "0 0 0 3px var(--glow)";
+  }
+  // speak a trimmed, spoken-length version of whatever an employee just produced
+  function sayGist(node, who) {
+    if (!node) return;
+    const t = stripMd(node.textContent || "").replace(/\s+/g, " ").trim();
+    if (t) speak(t.slice(0, 320) + (t.length > 320 ? "…" : ""), who);
+  }
+  function elevenError(status) {
+    const map = {
+      401: ["The ElevenLabs API key was rejected.", "Go to elevenlabs.io and sign in.", "Open Settings → “API keys” (elevenlabs.io/app/settings/api-keys) and create a fresh key.", "Paste it into Settings → ElevenLabs → API key."],
+      402: ["This voice needs a paid ElevenLabs plan. Free plans can only use the built-in voices via the API — Voice Library and custom voices are blocked.",
+            "Fix for free: in Settings → ElevenLabs, press “Load my voices” and pick one marked “built-in” (e.g. George, Brian, Daniel).",
+            "Or upgrade at elevenlabs.io/app/subscription (Starter is $5/mo) and your current voice will work with no other change.",
+            "Alfred uses the browser voice until then."],
+      422: ["The Voice ID wasn't recognized.", "In Settings → ElevenLabs press “Load my voices” and choose from the list.", "That fills in a valid Voice ID automatically."],
+      429: ["ElevenLabs is rate-limiting or the monthly character quota is used up.", "Check elevenlabs.io/app/subscription for remaining characters.", "Wait a minute, or upgrade, then try again."],
+    };
+    fixCard("ElevenLabs voice didn't play", map[status] || [
+      "ElevenLabs returned an error (HTTP " + status + ").",
+      "Re-check the API key and Voice ID in Settings.",
+      "Alfred will fall back to the browser voice meanwhile.",
+    ], "warn", { once: "eleven-" + status });
+  }
+
+  $("#replayVoice").addEventListener("click", () => {
+    $("#replayVoice").style.boxShadow = "";
+    const p = pendingSpeech;
+    pendingSpeech = null;
+    if (!settings.voice) {
+      fixCard("Voice is switched off", [
+        "Open Settings (left sidebar, ⚙).",
+        "Tick “Alfred speaks”.",
+        "Come back and press 🔊 again.",
+      ], "info", { once: "voice-off" });
+      return;
+    }
+    speak(p ? p.text : (greetingText() + " " + greetingSub()), p ? p.who : "alfred");
+  });
+
+  /* ===================================================================
+     Alfred home (HUD number + metrics)
+  =================================================================== */
+  function renderAlfredHome() {
+    const open = orders.filter(o => o.status !== "Delivered").length;
+    const unread = emails.filter(e => !e.read).length;
+    $("#hudBig").textContent = open + unread;
+
+    const late = orders.filter(o => o.status !== "Delivered" && (daysBetween(o.eta) ?? 99) < 0).length;
+    const soon = orders.filter(o => o.status !== "Delivered" && [0, 1, 2].includes(daysBetween(o.eta))).length;
+    const flagged = emails.filter(isFlagged).length;
+
+    $("#alfredMetrics").replaceChildren(
+      metric("Open orders", open, late ? `${late} overdue` : "on schedule", late ? "down" : "up"),
+      metric("Arriving ≤2d", soon, soon ? "heads up" : "quiet", ""),
+      metric("Unread email", unread, flagged ? `${flagged} flagged` : "nothing urgent", flagged ? "down" : "up"),
+      metric("Saved ideas", ideas.length, "from Ivy", ""),
+    );
+  }
+  function metric(k, v, d, dir) {
+    return el("div", { class: "metric" }, [
+      el("div", { class: "k", text: k }),
+      el("div", { class: "v", text: v }),
+      el("div", { class: "d " + (dir || ""), text: d || "" }),
+    ]);
+  }
+
+  /* ===================================================================
+     Inbox — Miles
+  =================================================================== */
+  const FLAG_RE = /\b(urgent|asap|immediately|today|refund|complaint|cancel|overdue|past due|invoice|chargeback|dispute|angry|wrong|missing|broken|damaged)\b/i;
+  function isFlagged(e) { return FLAG_RE.test((e.subject || "") + " " + (e.body || "")); }
+
+  function renderEmails() {
+    const list = $("#emailList");
+    if (!emails.length) { list.replaceChildren(el("div", { class: "empty", text: "No emails yet. Add one, or paste what Mom forwards you." })); }
+    else {
+      list.replaceChildren(...emails.slice().sort((a, b) => (b.date || "").localeCompare(a.date || "")).map(e => {
+        const flag = isFlagged(e);
+        return el("div", { class: "item" }, [
+          el("div", { class: "line1" }, [
+            !e.read ? el("span", { class: "dot-unread" }) : null,
+            el("span", { class: "t", text: e.subject || "(no subject)" }),
+            flag ? el("span", { class: "pill danger", text: "needs you" }) : null,
+            e.sample ? el("span", { class: "pill dim", text: "sample" }) : null,
+            el("div", { class: "acts" }, [
+              el("button", { text: e.read ? "mark unread" : "mark read", onclick: () => { e.read = !e.read; persist(); refreshAll(); } }),
+              el("button", { text: "delete", onclick: () => { emails = emails.filter(x => x.id !== e.id); persist(); refreshAll(); } }),
+            ]),
+          ]),
+          el("div", { class: "meta", text: `${e.from || "unknown"} · ${fmtDate(e.date) || "no date"}` }),
+          e.body ? el("div", { class: "meta", text: e.body.slice(0, 160) + (e.body.length > 160 ? "…" : "") }) : null,
+        ]);
+      }));
+    }
+    const n = emails.filter(e => !e.read).length;
+    setTag("inbox", n);
+  }
+
+  $("#addEmailToggle").addEventListener("click", () => { const f = $("#emailForm"); f.hidden = !f.hidden; });
+  $("#clearEmails").addEventListener("click", () => {
+    if (!emails.length) return;
+    if (confirm("Clear all emails from Alfred?")) { emails = []; persist(); refreshAll(); }
+  });
+  $("#emailForm").addEventListener("submit", e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    emails.unshift({ id: uid(), from: fd.get("from").trim(), subject: fd.get("subject").trim(),
+      body: (fd.get("body") || "").trim(), date: fd.get("date") || todayISO(), read: false });
+    e.target.reset(); e.target.hidden = true; persist(); refreshAll();
+  });
+
+  $("#briefBtn").addEventListener("click", () => runBrief());
+  async function runBrief() {
+    const out = $("#briefOut");
+    if (!emails.length) { out.className = "empty"; out.textContent = "No emails to brief on yet."; return; }
+    out.className = ""; out.innerHTML = "<span class='muted'>Miles is reading…</span>";
+    if (settings.anthropic) {
+      const data = emails.map(e => ({ from: e.from, subject: e.subject, body: (e.body || "").slice(0, 400), read: !!e.read }));
+      const r = await askClaude(
+        "You are Miles, the email manager on Alfred's team. Give a tight brief: 2-3 sentence overview, then a short bullet list of items that need action (most urgent first) with a suggested next step each. Plain, practical, no fluff.",
+        "Here are the emails as JSON:\n" + JSON.stringify(data, null, 2)
+      );
+      if (r) { out.innerHTML = fmt(r); sayGist(out, "miles"); return; }
+    }
+    out.innerHTML = fmt(localBrief());
+    sayGist(out, "miles");
+  }
+  function localBrief() {
+    const unread = emails.filter(e => !e.read);
+    const flagged = emails.filter(isFlagged);
+    let s = `**${emails.length} emails**, ${unread.length} unread. `;
+    s += flagged.length ? `${flagged.length} look time-sensitive.` : `Nothing screams urgent.`;
+    s += "\n\n";
+    if (flagged.length) {
+      s += "**Deal with first**\n";
+      flagged.forEach(e => { s += `- ${e.from}: *${e.subject}* — ${suggestAction(e)}\n`; });
+      s += "\n";
+    }
+    const rest = unread.filter(e => !isFlagged(e));
+    if (rest.length) {
+      s += "**Then skim**\n";
+      rest.forEach(e => { s += `- ${e.from}: ${e.subject}\n`; });
+    }
+    if (!unread.length) s += "_Inbox is fully read. Nice._";
+    return s;
+  }
+  function suggestAction(e) {
+    const t = (e.subject + " " + e.body).toLowerCase();
+    if (/refund|chargeback|dispute/.test(t)) return "reply today with the refund status or a clear timeline";
+    if (/wrong|missing|broken|damaged/.test(t)) return "confirm the order #, apologize, offer replacement or refund";
+    if (/invoice|past due|overdue/.test(t)) return "check if it's paid; if not, schedule payment and reply with the date";
+    if (/cancel/.test(t)) return "call, don't email — save the account if you can";
+    return "reply with a short acknowledgement and a next step";
+  }
+
+  /* ===================================================================
+     Orders — Otto
+  =================================================================== */
+  function orderPill(o) {
+    if (o.status === "Delivered") return { cls: "ok", txt: "delivered" };
+    if (o.status === "Delayed")   return { cls: "danger", txt: "delayed" };
+    const d = daysBetween(o.eta);
+    if (d === null) return { cls: "", txt: o.status.toLowerCase() };
+    if (d < 0)  return { cls: "danger", txt: `overdue ${-d}d` };
+    if (d === 0) return { cls: "warn", txt: "arrives today" };
+    if (d <= 2) return { cls: "warn", txt: `in ${d}d` };
+    return { cls: "", txt: `in ${d}d` };
+  }
+  function sortOrders(a, b) {
+    const dl = o => o.status === "Delivered" ? 1 : 0;
+    if (dl(a) !== dl(b)) return dl(a) - dl(b);
+    const ea = a.eta || "9999", eb = b.eta || "9999";
+    return ea.localeCompare(eb);
+  }
+  function renderOrders() {
+    const list = $("#orderList");
+    if (!orders.length) { list.replaceChildren(el("div", { class: "empty", text: "No orders tracked yet. Add one and Otto will watch it." })); }
+    else {
+      list.replaceChildren(...orders.slice().sort(sortOrders).map(o => {
+        const p = orderPill(o);
+        return el("div", { class: "item" }, [
+          el("div", { class: "line1" }, [
+            el("span", { class: "t", text: o.item }),
+            el("span", { class: "pill " + p.cls, text: p.txt }),
+            o.sample ? el("span", { class: "pill dim", text: "sample" }) : null,
+            el("div", { class: "acts" }, [
+              o.track ? el("button", { text: "track", onclick: () => window.open(o.track, "_blank", "noopener") }) : null,
+              el("button", { text: "edit", onclick: () => editOrder(o) }),
+              el("button", { text: "delete", onclick: () => { orders = orders.filter(x => x.id !== o.id); persist(); refreshAll(); } }),
+            ]),
+          ]),
+          el("div", { class: "meta", text: [o.vendor, o.ref && "#" + o.ref, o.status].filter(Boolean).join(" · ") }),
+          el("div", { class: "meta", text: [o.shipped && "shipped " + fmtDate(o.shipped), o.eta && "ETA " + fmtDate(o.eta), o.notes].filter(Boolean).join("  ·  ") }),
+        ]);
+      }));
+    }
+    setTag("orders", orders.filter(o => o.status !== "Delivered").length);
+  }
+  function editOrder(o) {
+    go("orders");
+    const f = $("#orderForm"); f.hidden = false;
+    for (const k of ["item", "vendor", "ref", "status", "shipped", "eta", "track", "notes"]) f.elements[k].value = o[k] || "";
+    f.dataset.editing = o.id;
+    f.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  $("#addOrderToggle").addEventListener("click", () => { const f = $("#orderForm"); f.hidden = !f.hidden; delete f.dataset.editing; f.reset(); });
+  $("#orderForm").addEventListener("submit", e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const rec = {}; for (const k of ["item","vendor","ref","status","shipped","eta","track","notes"]) rec[k] = (fd.get(k) || "").trim();
+    const editing = e.target.dataset.editing;
+    if (editing) {
+      const o = orders.find(x => x.id === editing);
+      Object.assign(o, rec); delete o.sample;
+    } else {
+      orders.unshift(Object.assign({ id: uid() }, rec));
+    }
+    e.target.reset(); e.target.hidden = true; delete e.target.dataset.editing;
+    persist(); refreshAll();
+  });
+
+  $("#orderRecap").addEventListener("click", () => runRecap());
+  async function runRecap() {
+    const out = $("#recapOut");
+    if (!orders.length) { out.className = "empty"; out.textContent = "Nothing to recap — add an order first."; return; }
+    out.className = ""; out.innerHTML = "<span class='muted'>Otto is checking…</span>";
+    if (settings.anthropic) {
+      const r = await askClaude(
+        "You are Otto, the order & logistics tracker on Alfred's team. Give a crisp status recap: lead with anything overdue or arriving in the next 2 days, then the rest. One line per order. End with a single recommended action if there is one.",
+        "Orders JSON (today is " + todayISO() + "):\n" + JSON.stringify(orders.map(o => ({ item:o.item, vendor:o.vendor, status:o.status, shipped:o.shipped, eta:o.eta, notes:o.notes })), null, 2)
+      );
+      if (r) { out.innerHTML = fmt(r); sayGist(out, "otto"); return; }
+    }
+    out.innerHTML = fmt(localRecap());
+    sayGist(out, "otto");
+  }
+  function localRecap() {
+    const s = orders.slice().sort(sortOrders);
+    const late = s.filter(o => o.status !== "Delivered" && (daysBetween(o.eta) ?? 99) < 0);
+    const soon = s.filter(o => o.status !== "Delivered" && [0,1,2].includes(daysBetween(o.eta)));
+    const rest = s.filter(o => !late.includes(o) && !soon.includes(o));
+    let out = "";
+    if (late.length) { out += "**Overdue — chase these**\n"; late.forEach(o => out += `- ${o.item} (${o.vendor || "?"}) — ETA was ${fmtDate(o.eta)}. ${o.track ? "Open tracking." : "No tracking link on file."}\n`); out += "\n"; }
+    if (soon.length) { out += "**Arriving now**\n"; soon.forEach(o => out += `- ${o.item} — ${orderPill(o).txt}\n`); out += "\n"; }
+    if (rest.length) { out += "**On the way / done**\n"; rest.forEach(o => out += `- ${o.item} — ${o.status}${o.eta ? ", ETA " + fmtDate(o.eta) : ""}\n`); }
+    if (late.length) out += `\n**Do now:** contact ${late[0].vendor || "the vendor"} about “${late[0].item}”.`;
+    return out || "_All clear._";
+  }
+
+  /* ===================================================================
+     Ideas — Ivy
+  =================================================================== */
+  $("#ideaCtx").value = settings.biz || "";
+  $("#genIdeas").addEventListener("click", () => genIdeas());
+  async function genIdeas() {
+    const ctx = $("#ideaCtx").value.trim();
+    if (ctx && ctx !== settings.biz) { settings.biz = ctx; persist(); }
+    const out = $("#ideaOut");
+    out.replaceChildren(el("div", { class: "empty", text: "Ivy is thinking…" }));
+    let list;
+    if (settings.anthropic) {
+      const r = await askClaude(
+        "You are Ivy, the strategy person on Alfred's team. Return exactly 5 concrete, low-cost ideas the person could start this week. Each: one bold phrase + one sentence of how. No preamble. Use a markdown bullet list.",
+        "Context: " + (ctx || "small wholesaling + customer-service business")
+      );
+      if (r) { out.innerHTML = fmt(r); wireSaveButtons(out); sayGist(out, "ivy"); return; }
+    }
+    list = localIdeas(ctx);
+    out.replaceChildren(...list.map(t => el("div", { class: "item" }, [
+      el("div", { class: "line1" }, [ el("span", { class: "t", text: t }),
+        el("div", { class: "acts" }, [ el("button", { text: "save", onclick: () => saveIdea(t) }) ]) ]),
+    ])));
+    speak("Ivy here. " + list.slice(0, 3).join(". ") + ".", "ivy");
+  }
+  function localIdeas(ctx) {
+    const t = (ctx || "").toLowerCase();
+    const pool = [
+      "Bundle your 3 slowest SKUs with a bestseller at a small discount to clear stock",
+      "Set a same-day reply rule for any email with 'refund' or 'wrong' — speed saves the account",
+      "Ask your 5 best buyers what they wish you also carried; pre-sell before you order",
+      "Build one reusable 'here's what to say' script for the top 3 customer complaints",
+      "Raise your minimum order value by 10% and see if volume holds — usually does",
+      "Photograph every inbound shipment on arrival; disputes get resolved 2x faster",
+      "Offer net-15 terms only to buyers with 3+ clean orders; everyone else prepays",
+      "Batch all supplier ordering to one day a week to cut shipping and mental load",
+      "Add a one-line 'how's it going?' email 7 days after delivery — cheapest reorder driver",
+      "Drop the SKU with the highest return rate even if it sells; margin is hiding there",
+    ];
+    if (/wholesal/.test(t)) pool.unshift("Create a simple one-page line sheet (photo, MOQ, price, lead time) to send buyers instantly");
+    if (/customer service|support|mom/.test(t)) pool.unshift("Write 5 canned responses for the calls Mom gets most; keep them by the phone");
+    return shuffle(pool).slice(0, 5);
+  }
+  function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+  $("#simplify").addEventListener("click", () => runSimplify());
+  async function runSimplify() {
+    const raw = $("#prodList").value.trim();
+    const out = $("#simplifyOut");
+    if (!raw) { out.className = "empty"; out.textContent = "Paste a product list first."; return; }
+    out.className = ""; out.innerHTML = "<span class='muted'>Ivy is reviewing the list…</span>";
+    if (settings.anthropic) {
+      const r = await askClaude(
+        "You are Ivy. Given a rough product/inventory list, recommend how to simplify the range: what to cut, what to bundle, what to promote, and any gaps. Be decisive. Short markdown sections.",
+        "List:\n" + raw + (settings.biz ? "\n\nBusiness: " + settings.biz : "")
+      );
+      if (r) { out.innerHTML = fmt(r); sayGist(out, "ivy"); return; }
+    }
+    const lines = raw.split(/\n+/).map(s => s.trim()).filter(Boolean);
+    let s = `**${lines.length} items on the list.**\n\n`;
+    s += "**Rules of thumb Ivy would apply**\n";
+    s += "- Anything you can't describe in 5 words or sell in a sentence: cut or bundle.\n";
+    s += "- Near-duplicates (same thing, minor variant): keep the top seller, drop the rest.\n";
+    s += "- Slow movers with cash tied up: bundle with a hero product to clear.\n";
+    s += "- Keep the range to what fits on one line sheet — usually 8–15 SKUs.\n\n";
+    const dups = lines.filter((l, i) => lines.some((m, j) => j !== i && sharePrefix(l, m)));
+    if (dups.length) s += "**Looks like variants to consolidate**\n" + dups.map(d => "- " + d).join("\n") + "\n";
+    out.innerHTML = fmt(s);
+    sayGist(out, "ivy");
+  }
+  function sharePrefix(a, b) {
+    const wa = a.toLowerCase().split(/\W+/)[0], wb = b.toLowerCase().split(/\W+/)[0];
+    return wa && wa.length > 2 && wa === wb;
+  }
+
+  function saveIdea(text) {
+    if (!ideas.includes(text)) { ideas.push(text); persist(); renderSavedIdeas(); renderAlfredHome(); }
+  }
+  function wireSaveButtons(container) {
+    $$("li", container).forEach(li => {
+      if (li.querySelector(".btn")) return;
+      const b = el("button", { class: "btn sm ghost", style: "margin-left:6px", text: "save",
+        onclick: () => saveIdea(li.textContent.replace(/save$/, "").trim()) });
+      li.append(b);
+    });
+  }
+  function renderSavedIdeas() {
+    const box = $("#savedIdeas");
+    if (!ideas.length) { box.replaceChildren(el("div", { class: "empty", text: "Nothing saved yet." })); return; }
+    box.replaceChildren(...ideas.map(t => el("div", { class: "item" }, [
+      el("div", { class: "line1" }, [ el("span", { class: "t", text: t }),
+        el("div", { class: "acts" }, [ el("button", { text: "remove", onclick: () => { ideas = ideas.filter(x => x !== t); persist(); renderSavedIdeas(); renderAlfredHome(); } }) ]) ]),
+    ])));
+  }
+
+  /* ===================================================================
+     Revenue dashboard (RevenueCat)
+  =================================================================== */
+  const demoRC = { mrr: 4820, active: 612, trials: 48, newM: 73, churn: 3.9, rev30: 5140 };
+  function renderDash(rc = demoRC, real = false) {
+    $("#dashBig").textContent = "$" + rc.mrr.toLocaleString();
+    $("#dashNote").textContent = real
+      ? "Live from RevenueCat."
+      : "Sample figures. Connect RevenueCat in Settings to pull the real numbers.";
+    $("#dashMetrics").replaceChildren(
+      metric("MRR", "$" + rc.mrr.toLocaleString(), real ? "live" : "sample", "up"),
+      metric("Active subs", rc.active.toLocaleString(), "+" + rc.newM + " this month", "up"),
+      metric("Trials", rc.trials, "converting soon", ""),
+      metric("Churn", rc.churn + "%", rc.churn < 5 ? "healthy" : "watch", rc.churn < 5 ? "up" : "down"),
+      metric("Revenue 30d", "$" + rc.rev30.toLocaleString(), "gross", ""),
+    );
+  }
+  async function tryRevenueCat(silent) {
+    if (!settings.rc) {
+      if (!silent) fixCard("No RevenueCat key yet", [
+        "Open app.revenuecat.com → Project settings → API keys.",
+        "Copy a v2 secret key (starts with sk_).",
+        "Paste it into Settings → RevenueCat and press “Try connecting”.",
+      ], "info", { once: "rc-nokey" });
+      return;
+    }
+    try {
+      const r = await fetch("https://api.revenuecat.com/v2/projects", {
+        headers: { Authorization: "Bearer " + settings.rc, "Content-Type": "application/json" },
+      });
+      if (!r.ok) {
+        fixCard("RevenueCat rejected the request", [
+          "HTTP " + r.status + " from RevenueCat.",
+          "Make sure the key is a v2 secret key (sk_…), not a public SDK key.",
+          "Regenerate it at app.revenuecat.com → Project settings → API keys if unsure.",
+        ], "warn", { once: "rc-" + r.status });
+        return;
+      }
+      // Projects list alone isn't the metrics feed; treat a success as "connected" and keep demo figures.
+      renderDash(demoRC, false);
+      $("#dashNote").textContent = "Connected to RevenueCat. Live MRR needs a tiny relay — see the note Alfred left.";
+      fixCard("RevenueCat connected — one more step for live numbers", [
+        "The key works. RevenueCat's charts API isn't fully readable straight from a browser page.",
+        "To show live MRR here, run a 10-line relay (Cloudflare Worker / small serverless function) that calls RevenueCat with this key and returns JSON.",
+        "Point Alfred at that relay URL later and the dashboard goes live. Ask Alfred: “help me set up the RevenueCat relay”.",
+      ], "info", { once: "rc-ok", autohide: false });
+    } catch (e) {
+      fixCard("Couldn't reach RevenueCat from the browser", [
+        "This is almost always CORS — browsers block direct calls to the RevenueCat API.",
+        "It's not your key. You'll need a small relay (serverless function) that holds the key and returns the numbers.",
+        "Until then the dashboard shows sample figures so the layout is ready.",
+      ], "warn", { once: "rc-cors", autohide: false });
+    }
+  }
+
+  /* ===================================================================
+     Alfred chat
+  =================================================================== */
+  const chatLog = $("#chatLog"), chatInput = $("#chatInput");
+  function renderChat() {
+    chatLog.replaceChildren(...chat.map(m => msgNode(m.role, m.content)));
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+  function msgNode(role, text, typing) {
+    const me = role === "user";
+    return el("div", { class: "msg " + (me ? "me" : "alfred") + (typing ? " typing" : "") }, [
+      el("div", { class: "av", text: me ? "you" : "A" }),
+      el("div", { class: "bubble", html: typing ? "Alfred is thinking…" : fmt(text) }),
+    ]);
+  }
+  function pushMsg(role, content) { chat.push({ role, content }); persist(); renderChat(); }
+
+  async function sendChat(text) {
+    text = (text || chatInput.value).trim();
+    if (!text) return;
+    chatInput.value = ""; autolGrow();
+    pushMsg("user", text);
+
+    const typing = msgNode("assistant", "", true);
+    chatLog.append(typing); chatLog.scrollTop = chatLog.scrollHeight;
+
+    let reply;
+    if (settings.anthropic) {
+      reply = await askClaude(alfredSystem(), null, chat.slice(-16));
+    }
+    if (!reply) reply = localAlfred(text);
+    typing.remove();
+    pushMsg("assistant", reply);
+    // if Alfred handed the answer to a teammate, speak it in their voice
+    let who = "alfred";
+    if (/^\s*Otto'?s\b/i.test(reply)) who = "otto";
+    else if (/^\s*Miles\b/i.test(reply)) who = "miles";
+    else if (/^\s*Ivy'?s\b/i.test(reply)) who = "ivy";
+    speak(stripMd(reply).slice(0, 400), who);
+    refreshBadgesOnly();
+  }
+  $("#sendBtn").addEventListener("click", () => sendChat());
+  chatInput.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  });
+  function autolGrow() { chatInput.style.height = "auto"; chatInput.style.height = Math.min(chatInput.scrollHeight, 140) + "px"; }
+  chatInput.addEventListener("input", autolGrow);
+  $("#quickChips").addEventListener("click", e => { const b = e.target.closest("button"); if (b) sendChat(b.dataset.q); });
+
+  // --- speech-to-text: "talk to Alfred" ---
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { $("#micBtn").style.display = "none"; }
+  else {
+    let rec = null, listening = false;
+    $("#micBtn").addEventListener("click", () => {
+      if (listening) { rec && rec.stop(); return; }
+      rec = new SR(); rec.lang = navigator.language || "en-US"; rec.interimResults = true;
+      let final = "";
+      rec.onresult = ev => {
+        let interim = "";
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const t = ev.results[i][0].transcript;
+          if (ev.results[i].isFinal) final += t; else interim += t;
+        }
+        chatInput.value = (final + interim).trim(); autolGrow();
+      };
+      rec.onerror = ev => {
+        listening = false; $("#micBtn").style.boxShadow = "";
+        if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+          fixCard("Microphone is blocked", [
+            "Click the padlock / site-info icon next to the address bar.",
+            "Set Microphone to “Allow” for this page.",
+            "Reload Alfred and press 🎙 again.",
+          ], "warn", { once: "mic-perm" });
+        }
+      };
+      rec.onend = () => { listening = false; $("#micBtn").style.boxShadow = ""; if (chatInput.value.trim()) sendChat(); };
+      try { rec.start(); listening = true; $("#micBtn").style.boxShadow = "0 0 0 3px var(--glow)"; }
+      catch { listening = false; }
+    });
+  }
+
+  function alfredSystem() {
+    const name = settings.name || "the boss";
+    const biz = settings.biz || "a small business doing wholesaling and customer service";
+    return [
+      `You are Alfred, a warm, unflappable British chief of staff for ${name}.`,
+      `Your job: make ${name}'s life easier. You run a small team and speak for them:`,
+      `- Miles handles email. Otto tracks orders & shipping. Ivy handles ideas & product strategy.`,
+      `When a request belongs to a teammate, answer it yourself using the live data below and attribute briefly ("Otto's read:", "Miles flagged...").`,
+      `Business context: ${biz}.`,
+      `Be concise — this is a dashboard. Short paragraphs or tight bullets. Never invent an order, email, date or number that isn't in the data. If something's missing, say what you'd need.`,
+      `If the user hits an error or something's broken, give them numbered steps to fix it.`,
+      `Today is ${new Date().toDateString()}, local time ${new Date().toLocaleTimeString()}.`,
+      ``,
+      `LIVE DATA (JSON):`,
+      `orders = ${JSON.stringify(orders.map(o => ({ item:o.item, vendor:o.vendor, ref:o.ref, status:o.status, shipped:o.shipped, eta:o.eta, notes:o.notes })))}`,
+      `emails = ${JSON.stringify(emails.map(e => ({ from:e.from, subject:e.subject, body:(e.body||"").slice(0,300), read:!!e.read })))}`,
+      `saved_ideas = ${JSON.stringify(ideas)}`,
+    ].join("\n");
+  }
+
+  function localAlfred(text) {
+    const t = text.toLowerCase();
+    const name = settings.name ? " " + settings.name : "";
+    if (/^(hi|hey|hello|yo|morning|good (morning|afternoon|evening))\b/.test(t))
+      return `${greetingText()} ${greetingSub()}\n\nAsk me for your **morning brief**, an **order status**, an **inbox summary**, or **ideas**.`;
+    if (/(morning|daily|day) brief|brief me|catch me up|what.s (on|up|going on)|rundown/.test(t)) return localMorningBrief();
+    if (/order|ship|track|delivery|arrive|package|parcel|eta/.test(t)) { go("orders"); return "Otto's read:\n\n" + localRecap(); }
+    if (/inbox|email|mail|message/.test(t)) { go("inbox"); return "Miles flagged this:\n\n" + localBrief(); }
+    if (/idea|suggest|grow|improve|strategy|simplif/.test(t)) { go("ideas"); return "Ivy's shortlist:\n\n- " + localIdeas(settings.biz).join("\n- "); }
+    if (/help|what can you|who are you|features/.test(t))
+      return `I'm Alfred${name}. I keep the day together and hand work to the team:\n\n- **Miles** — email: "summarize my inbox"\n- **Otto** — orders: "where are my orders"\n- **Ivy** — ideas: "give me 3 ideas" / "simplify my products"\n\nAdd an Anthropic key in **Settings** and I'll answer anything in my own words. Add an ElevenLabs key and I'll speak properly.`;
+    if (/thank|cheers|nice one/.test(t)) return "Always. What's next?";
+    // fallback
+    return `I've noted that${name}. My offline brain is best at four things: **morning brief**, **order status**, **inbox summary**, and **ideas**. For free-form questions, pop an Anthropic API key into Settings and I'll take it from there — here's how:\n\n1. Go to console.anthropic.com → **API keys**.\n2. Create a key, set a low monthly cap.\n3. Paste it in **Settings → Alfred's brain**.\n4. Come back and ask me again.`;
+  }
+  function localMorningBrief() {
+    const unread = emails.filter(e => !e.read).length;
+    const flagged = emails.filter(isFlagged);
+    const late = orders.filter(o => o.status !== "Delivered" && (daysBetween(o.eta) ?? 99) < 0);
+    const soon = orders.filter(o => o.status !== "Delivered" && [0,1,2].includes(daysBetween(o.eta)));
+    let s = `**${greetingText()}**\n\n`;
+    s += `**Inbox** — ${unread} unread` + (flagged.length ? `, ${flagged.length} need a reply today:` : ", nothing urgent.") + "\n";
+    flagged.slice(0, 3).forEach(e => s += `- ${e.from}: ${e.subject}\n`);
+    s += `\n**Orders** — `;
+    if (late.length) s += `${late.length} overdue (${late.map(o => o.item).join("; ")}). `;
+    if (soon.length) s += `${soon.length} arriving in ≤2 days. `;
+    if (!late.length && !soon.length) s += `all on schedule. `;
+    s += "\n";
+    if (ideas.length) s += `\n**From Ivy** — you saved: "${ideas[ideas.length - 1]}"\n`;
+    s += `\n**Alfred's suggestion:** ` + (late.length ? `chase ${late[0].vendor || "the vendor"} on "${late[0].item}" first.` :
+      flagged.length ? `clear the ${flagged.length} flagged emails, then you're ahead.` :
+      `quiet morning — good time for one of Ivy's ideas.`);
+    return s;
+  }
+
+  /* ===================================================================
+     Claude API
+  =================================================================== */
+  async function askClaude(system, userMsg, history) {
+    const msgs = history
+      ? history.map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.content) }))
+      : [{ role: "user", content: userMsg }];
+    if (msgs.length && msgs[0].role !== "user") msgs.unshift({ role: "user", content: "(start)" });
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": settings.anthropic,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: settings.model || "claude-sonnet-5",
+          max_tokens: 1024,
+          system,
+          messages: msgs,
+        }),
+      });
+      if (!r.ok) {
+        let body = ""; try { body = (await r.json()).error?.message || ""; } catch {}
+        claudeError(r.status, body);
+        return null;
+      }
+      const j = await r.json();
+      const txt = (j.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+      return txt || null;
+    } catch (e) {
+      fixCard("Couldn't reach Anthropic", [
+        "Check your internet connection.",
+        "Some office / school networks block API domains — try another network or a phone hotspot.",
+        "If it only happens here, your browser may be blocking the direct API call; try a different browser.",
+        "Alfred is falling back to his offline brain meanwhile.",
+      ], "warn", { once: "claude-net" });
+      return null;
+    }
+  }
+  function claudeError(status, body) {
+    const maps = {
+      401: ["Your Anthropic API key was rejected.", "Open console.anthropic.com → “API keys”.", "Create a fresh key (the old one may be revoked or mistyped).", "Paste it into Settings → Alfred's brain and try again."],
+      400: ["Anthropic rejected the request" + (body ? ": " + body : "") + ".", "Most often the model name — open Settings → Alfred's brain → Model.", "Try 'claude-sonnet-5', or copy the current id from docs.anthropic.com/en/docs/about-claude/models.", "Save and ask again."],
+      429: ["You're rate-limited or out of credit.", "Check console.anthropic.com → “Billing”.", "Add a little credit or wait ~1 minute.", "Then retry — Alfred kept your message."],
+      529: ["Anthropic is temporarily overloaded.", "Wait 20–30 seconds.", "Ask again — this usually clears quickly."],
+    };
+    fixCard("Alfred's AI brain hit an error", maps[status] || [
+      "Anthropic returned HTTP " + status + (body ? " — " + body : "") + ".",
+      "Wait a moment and try again.",
+      "If it persists, re-check the API key and model in Settings.",
+      "Alfred is using his offline brain in the meantime.",
+    ], "warn", { once: "claude-" + status });
+  }
+
+  /* ===================================================================
+     Tiny markdown renderer (safe: escapes first)
+  =================================================================== */
+  function fmt(src) {
+    let s = esc(src || "");
+    const lines = s.split(/\r?\n/);
+    let html = "", inList = false;
+    for (let line of lines) {
+      line = line
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, "$1<em>$2</em>")
+        .replace(/`([^`]+)`/g, "<code>$1</code>");
+      if (/^\s*[-•]\s+/.test(line)) {
+        if (!inList) { html += "<ul>"; inList = true; }
+        html += "<li>" + line.replace(/^\s*[-•]\s+/, "") + "</li>";
+      } else if (/^\s*\d+\.\s+/.test(line)) {
+        if (!inList) { html += "<ul>"; inList = true; }
+        html += "<li>" + line.replace(/^\s*\d+\.\s+/, "") + "</li>";
+      } else {
+        if (inList) { html += "</ul>"; inList = false; }
+        if (line.trim() === "") html += "";
+        else html += "<p>" + line + "</p>";
+      }
+    }
+    if (inList) html += "</ul>";
+    return html || "<p></p>";
+  }
+  function stripMd(s) { return String(s || "").replace(/[*_`#>-]/g, "").replace(/\n{2,}/g, ". ").replace(/\n/g, " ").trim(); }
+
+  /* ===================================================================
+     Settings wiring
+  =================================================================== */
+  function loadSettingsForm() {
+    $("#setName").value = settings.name;
+    $("#setBiz").value = settings.biz;
+    $("#setVoice").checked = !!settings.voice;
+    $("#setAnthropic").value = settings.anthropic;
+    $("#setModel").value = settings.model;
+    $("#setEleven").value = settings.eleven;
+    $("#setElevenVoice").value = settings.elevenVoice;
+    $("#setRC").value = settings.rc;
+    populateVoices();
+    if (settings.eleven) loadElevenVoices(true);
+  }
+  function bindSetting(sel, key, ev = "input", transform = v => v) {
+    $(sel).addEventListener(ev, e => {
+      settings[key] = transform(e.target.type === "checkbox" ? e.target.checked : e.target.value.trim());
+      persist(); updateModeChip(); renderGreeting();
+    });
+  }
+  bindSetting("#setName", "name"); bindSetting("#setBiz", "biz");
+  bindSetting("#setVoice", "voice", "change");
+  bindSetting("#setAnthropic", "anthropic"); bindSetting("#setModel", "model");
+  bindSetting("#setEleven", "eleven"); bindSetting("#setElevenVoice", "elevenVoice");
+  bindSetting("#setRC", "rc");
+  $("#setBrowserVoice").addEventListener("change", e => { settings.browserVoice = e.target.value; persist(); });
+
+  function populateVoices() {
+    if (!("speechSynthesis" in window)) { $("#setBrowserVoice").disabled = true; return; }
+    const sel = $("#setBrowserVoice");
+    const vs = speechSynthesis.getVoices();
+    sel.replaceChildren(el("option", { value: "" }, "Default"));
+    vs.forEach(v => sel.append(el("option", { value: v.voiceURI }, `${v.name} (${v.lang})`)));
+    sel.value = settings.browserVoice || "";
+  }
+  if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = populateVoices;
+
+  $("#testVoice").addEventListener("click", () => {
+    if (!settings.voice) { settings.voice = true; $("#setVoice").checked = true; persist(); updateModeChip(); }
+    speak(`Good ${partOfDay()}${settings.name ? ", " + settings.name : ""}. Alfred, reporting for duty.`);
+  });
+  // the four voice pickers → which setting each one writes
+  const VOICE_PICKERS = [
+    ["#setElevenPick", "elevenVoice", "alfred", "Alfred here — I keep your day together."],
+    ["#pickMiles",     "voiceMiles",  "miles",  "Miles. I keep the inbox under control."],
+    ["#pickOtto",      "voiceOtto",   "otto",   "Otto. I track every order and when it lands."],
+    ["#pickIvy",       "voiceIvy",    "ivy",    "Ivy. I bring you ideas worth acting on."],
+  ];
+  VOICE_PICKERS.forEach(([sel, key]) => {
+    $(sel).addEventListener("change", e => {
+      if (!e.target.value) return;
+      settings[key] = e.target.value;
+      if (key === "elevenVoice") $("#setElevenVoice").value = e.target.value;
+      persist();
+    });
+  });
+
+  $("#testEleven").addEventListener("click", async () => {
+    if (!settings.eleven) {
+      fixCard("No ElevenLabs key yet — playing the browser voices", [
+        "You'll hear all four with the computer's built-in voice (pitched differently per person).",
+        "For real distinct voices, add a key at elevenlabs.io/app/settings/api-keys, press “Load my voices”, and set one per teammate.",
+      ], "info", { once: "eleven-setup" });
+    }
+    const wasVoice = settings.voice; settings.voice = true;
+    for (const [, , who, line] of VOICE_PICKERS) {
+      const intro = who === "alfred"
+        ? `Good ${partOfDay()}${settings.name ? ", " + settings.name : ""}. ${line}`
+        : line;
+      await speak(intro, who);
+    }
+    settings.voice = wasVoice;
+  });
+
+  // --- Load the account's voices into all four pickers ---
+  $("#loadEleven").addEventListener("click", () => loadElevenVoices(false));
+  function fillPickers(labelText) {
+    VOICE_PICKERS.forEach(([sel]) => $(sel).replaceChildren(el("option", { value: "" }, labelText)));
+  }
+  async function loadElevenVoices(silent) {
+    if (!settings.eleven) {
+      if (!silent) fixCard("Add your ElevenLabs key first", [
+        "Get one at elevenlabs.io/app/settings/api-keys.",
+        "Paste it into the ElevenLabs API key field above.",
+        "Then press “Load my voices” again.",
+      ], "info", { once: "eleven-nokey" });
+      return;
+    }
+    fillPickers("Loading…");
+    try {
+      const r = await fetch("https://api.elevenlabs.io/v1/voices", { headers: { "xi-api-key": settings.eleven } });
+      if (!r.ok) { fillPickers("— couldn't load —"); elevenError(r.status); return; }
+      const j = await r.json();
+      const voices = (j.voices || []);
+      // built-in ("premade") voices work on every plan via API; others need a paid plan
+      voices.sort((a, b) => (a.category === "premade" ? 0 : 1) - (b.category === "premade" ? 0 : 1) || a.name.localeCompare(b.name));
+      let anyPaid = false;
+      const opts = voices.map(v => {
+        const l = v.labels || {};
+        const free = v.category === "premade";
+        if (!free) anyPaid = true;
+        const desc = [l.accent, l.gender].filter(Boolean).join(" ");
+        return { id: v.voice_id, text: `${v.name}${desc ? " — " + desc : ""}  · ${free ? "built-in" : "needs paid plan"}` };
+      });
+      VOICE_PICKERS.forEach(([sel, key]) => {
+        const s = $(sel);
+        s.replaceChildren(el("option", { value: "" }, "— choose a voice —"));
+        opts.forEach(o => s.append(el("option", { value: o.id }, o.text)));
+        s.value = settings[key] || "";
+      });
+      if (!silent) {
+        const n = voices.length;
+        fixCard("Loaded " + n + " voice" + (n === 1 ? "" : "s"),
+          anyPaid
+            ? ["Give each teammate a voice marked “built-in” — those work on the free plan.",
+               "Voices marked “needs paid plan” fail with a payment error until you upgrade."]
+            : ["Set a voice for each teammate, then press “Hear all four”."],
+          "info", { once: "eleven-loaded" });
+      }
+    } catch (e) {
+      fillPickers("— couldn't load —");
+      fixCard("Couldn't reach ElevenLabs to list voices", [
+        "Check your internet connection.",
+        "If you're on a file:// page and it keeps failing, run a local server: python -m http.server 8000, then open http://localhost:8000/alfred/",
+      ], "warn", { once: "eleven-list-net" });
+    }
+  }
+
+  $("#testRC").addEventListener("click", () => tryRevenueCat(false));
+
+  $("#wipeAll").addEventListener("click", () => {
+    if (!confirm("Erase all Alfred data on this device? This cannot be undone.")) return;
+    ["settings", "orders", "emails", "ideas", "chat", "tab", "greetDay"].forEach(store.del);
+    location.reload();
+  });
+
+  /* ===================================================================
+     Mode chip + nav badges
+  =================================================================== */
+  function updateModeChip() {
+    const chip = $("#modeChip");
+    if (settings.anthropic) { chip.textContent = "Alfred: AI"; chip.classList.add("live"); }
+    else { chip.textContent = "Local mode"; chip.classList.remove("live"); }
+  }
+  function setTag(name, n) {
+    const t = $(`[data-tag="${name}"]`);
+    if (!t) return;
+    t.textContent = n; t.hidden = !n;
+  }
+  function refreshBadgesOnly() { renderAlfredHome(); }
+  function refreshAll() {
+    renderEmails(); renderOrders(); renderSavedIdeas(); renderAlfredHome(); renderGreeting();
+  }
+
+  /* ===================================================================
+     Boot
+  =================================================================== */
+  loadSettingsForm();
+  updateModeChip();
+  renderChat();
+  refreshAll();
+  go(store.get("tab", "alfred"));
+
+  // greet — once we know voices are likely ready
+  function bootGreeting() {
+    renderGreeting();
+    const line = greetingText() + " " + greetingSub();
+    if (settings.voice) {
+      // give the browser a beat to load voices / settle autoplay policy
+      setTimeout(() => speak(line), 350);
+    }
+  }
+  if (document.readyState === "complete") bootGreeting();
+  else window.addEventListener("load", bootGreeting);
+
+  // if autoplay was blocked, the first interaction anywhere releases the greeting
+  window.addEventListener("pointerdown", function once() {
+    window.removeEventListener("pointerdown", once);
+    if (pendingSpeech) { const p = pendingSpeech; pendingSpeech = null; $("#replayVoice").style.boxShadow = ""; speak(p.text, p.who); }
+  }, { once: true });
+
+  if (firstRun) {
+    fixCard("Alfred is set up with sample data", [
+      "The orders and emails you see are examples — edit or delete them freely.",
+      "Tell Alfred your name in Settings so he greets you properly.",
+      "Optional: add an Anthropic key (free-form chat) and an ElevenLabs key (real voice).",
+    ], "info", { once: "firstrun", autohide: false });
+  }
+
+  // expose a hook for debugging
+  window.__alfred = { settings, get orders() { return orders; }, get emails() { return emails; } };
+})();
+</script>
+</body>
+</html>
