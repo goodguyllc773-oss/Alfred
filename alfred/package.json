@@ -43,7 +43,7 @@
     "publish": {
       "provider": "github",
       "owner": "goodguyllc773-oss",
-      "repo": "Alfred"
+      "repo": "alfred-releases"
     },
     "win": {
       "target": "nsis",

@@ -108,7 +108,7 @@ ipcMain.handle("update:check",   async () => { try { if (!autoUpdater) throw new
 ipcMain.handle("update:download", async () => { try { await autoUpdater.downloadUpdate(); return { ok: true }; } catch (e) { pushUpdate({ state: "error", error: e.message }); return { ok: false, error: e.message }; } });
 ipcMain.handle("update:install", () => { try { setImmediate(() => autoUpdater.quitAndInstall(false, true)); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle("update:version", () => app.getVersion());
-ipcMain.handle("update:openReleases", () => { shell.openExternal("https://github.com/goodguyllc773-oss/Alfred/releases/latest"); });
+ipcMain.handle("update:openReleases", () => { shell.openExternal("https://github.com/goodguyllc773-oss/alfred-releases/releases/latest"); });
 
 /* ===================== credentials + token storage ===================== */
 function readCreds() {

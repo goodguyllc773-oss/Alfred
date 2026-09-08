@@ -25,23 +25,26 @@ and taskbar icon are set at runtime from `assets/alfred.png`.
 
 ## Updates
 
-The installed app checks GitHub Releases on launch and shows a strip on the **Alfred
-home tab**: *up to date*, or *Download update* → *Restart & update*. Nothing installs
-without a click. (The portable `--dir` build can check but can't self-apply — install
-via `Alfred-Setup-*.exe` for working updates.)
+The installed app checks for a new version on launch and shows a strip on the
+**Alfred home tab**: *up to date*, or *Download update* → *Restart & update*. Nothing
+installs without a click.
 
-**Cutting a release** (so every install — yours, mom's, your friend's — updates):
+Updates are served from the **public** repo `goodguyllc773-oss/alfred-releases` (this
+code repo is private; a private feed would need a token baked into the shipped app).
+The portable `--dir` build can check but not self-apply — install via
+`Alfred-Setup-*.exe` for working updates.
+
+**Cutting a release** (every install — yours, mom's, your friend's — picks it up):
 
 ```bash
 # bump "version" in alfred/package.json, commit
 cd alfred && npm run dist
-gh release create vX.Y.Z \
+gh release create vX.Y.Z --repo goodguyllc773-oss/alfred-releases \
   dist/Alfred-Setup-X.Y.Z.exe dist/Alfred-Setup-X.Y.Z.exe.blockmap dist/latest.yml \
   -t vX.Y.Z -n "what changed"
 ```
 
-`build.publish` in `package.json` points at `goodguyllc773-oss/Alfred`; `npm run
-release` does the build + upload in one step if `GH_TOKEN` is set.
+`npm run release` does build + upload in one step when `GH_TOKEN` is set.
 
 ## Connect Gmail
 
