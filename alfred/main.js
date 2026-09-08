@@ -230,7 +230,7 @@ ipcMain.handle("brain:chat",   (_e, a) => brainChat(a || {}));
    Everything is stored encrypted in userData so it survives updates.
    `check` on every launch only LOCKS on an explicit revoked/expired.
 ========================================================================== */
-const LICENSE_SERVER = "";   // baked in at release time; empty = ask the owner to enter it
+const LICENSE_SERVER = "https://alfred-license.goodguyllc773.workers.dev";
 
 const LICENSE_FILE = () => dataFile("license.bin");
 const DEVICE_FILE = () => dataFile("device.json");
