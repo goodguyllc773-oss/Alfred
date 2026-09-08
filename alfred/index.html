@@ -56,6 +56,7 @@
   button { font: inherit; color: inherit; cursor: pointer; }
   input, textarea, select { font: inherit; color: inherit; }
   ::placeholder { color: var(--text-faint); }
+  [hidden] { display: none !important; }   /* author display rules must not beat the hidden attribute */
 
   /* ---- App shell ---------------------------------------------------------- */
   .app {
