@@ -1737,15 +1737,46 @@
     chatLog.append(typing); chatLog.scrollTop = chatLog.scrollHeight;
 
     let reply;
-    reply = await maybeAppHelp(text);                       // app diagnostics / live checks
-    if (!reply && settings.anthropic) {                     // advanced: cloud model, if a key is set
+
+    // 0. a plan is waiting for the user's word
+    if (pendingPlan) {
+      const plan = pendingPlan; pendingPlan = null;
+      if (/^\s*(go|yes|y|do it|proceed|confirm|approved?|ok(ay)?|sounds good|run it|send it|please)\b/i.test(text)) {
+        reply = "On it.\n\n" + await runPlan(plan, { approved: true });
+      } else if (/^\s*(no|nope|cancel|stop|abort|nvm|never ?mind|hold off|wait)\b/i.test(text)) {
+        reply = "Cancelled — nothing done.";
+      }
+      // otherwise: fall through and treat this as a fresh/adjusted request
+    }
+
+    // 1. app diagnostics / live checks
+    if (!reply) reply = await maybeAppHelp(text);
+
+    // 2. plain-language commands → delegate to the team (rule-brain, works with no model)
+    if (!reply) {
+      const acts = parseCommands(text);
+      if (acts.length) reply = await runPlan(acts);
+    }
+
+    // 3. the model (cloud key first if set, else Alfred's local brain)
+    if (!reply && settings.anthropic) {
       reply = await askClaude(alfredSystem(), null, chat.slice(-16));
     }
-    if (!reply && brainReady && NATIVE && NATIVE.brain) {   // Alfred's own local brain
+    if (!reply && brainReady && NATIVE && NATIVE.brain) {
       const r = await NATIVE.brain.chat({ system: alfredSystem(true), messages: chat.slice(-10) });
       if (r.ok && r.text) reply = r.text;
       else if (r.error && r.error !== "NOT_READY") fixCard("Alfred's brain hiccuped", [r.error, "Falling back to the basic brain for this one. Try again in a moment."], "warn", { once: null, autohide: true });
     }
+    // model may have asked the team to act — pull the action block out and run it
+    if (reply) {
+      const { prose, actions } = splitActions(reply);
+      if (actions && actions.length) {
+        const planMsg = await runPlan(actions);
+        reply = (prose ? prose + "\n\n" : "") + (planMsg || "");
+      }
+    }
+
+    // 4. rule-brain conversation fallback
     if (!reply) reply = localAlfred(text);
     typing.remove();
     pushMsg("assistant", reply);
@@ -2024,6 +2055,188 @@
     return null;
   }
 
+  /* ===================================================================
+     Delegation — Alfred makes the team do things
+     Tiers: 0 just do it · 1 do it + report · 2 announce & ask ·
+            3 (send email) always full preview + confirm
+  =================================================================== */
+  let pendingPlan = null;
+
+  const ACT = {
+    brief_inbox:  { tier: 0, label: () => "brief the inbox" },
+    recap_orders: { tier: 0, label: () => "recap the orders" },
+    ideas:        { tier: 0, label: a => "come up with ideas" + (a.context ? " about " + a.context : "") },
+    simplify:     { tier: 0, label: () => "review the product list" },
+    goto:         { tier: 0, label: a => "open the " + a.tab + " tab" },
+    draft_reply:  { tier: 1, label: a => "draft a reply to " + (a.match || "an email") },
+    add_order:    { tier: 1, label: a => "add an order — " + (a.item || "?") + (a.vendor ? " from " + a.vendor : "") },
+    save_idea:    { tier: 1, label: a => "save the idea" },
+    update_order: { tier: 2, label: a => "update the “" + (a.match || "?") + "” order" },
+    archive:      { tier: 2, label: a => "archive " + (a.match || "an email") },
+    trash:        { tier: 2, label: a => "trash " + (a.match || "an email") },
+    send_email:   { tier: 3, label: a => "send an email to " + (a.to || "?") },
+  };
+  const labelFor = a => (ACT[a.do] ? (typeof ACT[a.do].label === "function" ? ACT[a.do].label(a) : ACT[a.do].label) : a.do);
+
+  function findEmails(q) {
+    q = String(q || "").toLowerCase().trim();
+    if (!emails.length) return [];
+    if (/\b(urgent|important|time.?sensitive|flag|need|action)\b/.test(q)) return emails.filter(isFlagged);
+    if (/\bunread\b/.test(q)) return emails.filter(e => !e.read);
+    if (/\b(newsletter|promo|marketing|digest|spam|junk)\b/.test(q))
+      return emails.filter(e => /newsletter|no-?reply|promo|unsubscribe|marketing|digest|bulletin/i.test((e.from || "") + " " + (e.subject || "") + " " + (e.body || "")));
+    if (/^(all|every|each|the (rest|others?)|these|them|those)$/.test(q) || q === "") return emails.slice();
+    const toks = q.split(/[\s,]+/).filter(w => w.length > 2 && !/^(the|from|email|mail|to|reply|about|for|and|with|one|ones|guy|lady|person|regarding|re)$/.test(w));
+    if (!toks.length) return [];
+    return emails.filter(e => {
+      const hay = ((e.from || "") + " " + (e.fromRaw || "") + " " + (e.subject || "")).toLowerCase();
+      return toks.some(t => hay.includes(t));
+    });
+  }
+  function findOrder(q) {
+    q = String(q || "").toLowerCase().trim();
+    const toks = q.split(/[\s,]+/).filter(w => w.length > 2);
+    return orders.find(o => toks.some(t => ((o.item || "") + " " + (o.vendor || "") + " " + (o.ref || "")).toLowerCase().includes(t)));
+  }
+  function looseDate(s) {
+    if (!s) return "";
+    s = s.trim().toLowerCase();
+    const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    const now = new Date();
+    if (/today/.test(s)) return todayISO();
+    if (/tomorrow/.test(s)) { const d = new Date(now); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); }
+    const di = days.findIndex(d => s.includes(d));
+    if (di >= 0) { const d = new Date(now); let add = (di - d.getDay() + 7) % 7; if (add === 0) add = 7; d.setDate(d.getDate() + add); return d.toISOString().slice(0, 10); }
+    const dt = new Date(s); return isNaN(dt) ? "" : dt.toISOString().slice(0, 10);
+  }
+
+  // ---- rule-brain: turn plain instructions into actions ----
+  function parseCommands(text) {
+    const parts = String(text).split(/\s*(?:;|\n|\.\s+|,?\s+and\s+then\s+|,?\s+then\s+|,?\s+and\s+also\s+|,?\s+and\s+|,\s+)\s*/i).map(s => s.trim()).filter(Boolean);
+    const acts = [];
+    let cont = null; // last match-taking action verb, so "reply to X and Y" continues
+    for (const p of parts) {
+      const t = p.toLowerCase();
+      let m;
+      if (/\b(brief|summari[sz]e|go through|check|read)\b.*\b(inbox|e-?mails?|mail)\b/.test(t)) { acts.push({ do: "brief_inbox" }); cont = null; }
+      else if (/\b(recap|status|update|where('?s| are| is))\b.*\b(order|orders|shipping|package|parcel|deliver)/.test(t)) { acts.push({ do: "recap_orders" }); cont = null; }
+      else if ((m = p.match(/(?:draft|write|prep(?:are)?)\s+(?:up\s+)?(?:a\s+|some\s+|\d+\s+)?repl(?:y|ies)\s+(?:to|for)\s+(.+)/i))) {
+        const tgt = m[1].trim();
+        if (/\b(these|those|the (urgent|flagged|unread|rest|others?)|them|all)\b/i.test(tgt)) acts.push({ do: "draft_reply", match: tgt, group: true });
+        else tgt.split(/\s*(?:,| and )\s*/).filter(Boolean).forEach(x => acts.push({ do: "draft_reply", match: x.trim() }));
+        cont = "draft_reply";
+      }
+      else if ((m = p.match(/(?:trash|delete|bin|remove|get rid of)\s+(.+)/i))) { acts.push({ do: "trash", match: m[1].trim(), group: true }); cont = "trash"; }
+      else if ((m = p.match(/(?:archive|file away|file)\s+(.+)/i))) { acts.push({ do: "archive", match: m[1].trim(), group: true }); cont = "archive"; }
+      else if ((m = p.match(/add (?:an?\s+)?order\s+(?:for\s+)?(.+?)(?:\s+from\s+([\w .&'-]+?))?(?:\s+(?:eta|arriving|due|by)\s+([\w /.-]+))?$/i))) {
+        acts.push({ do: "add_order", item: m[1].trim(), vendor: (m[2] || "").trim(), eta: looseDate(m[3]) }); cont = null;
+      }
+      else if ((m = p.match(/mark\s+(?:the\s+)?(.+?)\s+(?:order\s+)?(?:as\s+)?(delivered|shipped|delayed)/i))) {
+        acts.push({ do: "update_order", match: m[1].trim(), changes: { status: m[2][0].toUpperCase() + m[2].slice(1) } }); cont = null;
+      }
+      else if ((m = t.match(/\b(\d+|a few|some|three|five)\s+ideas?(?:\s+(?:about|for|on)\s+(.+))?/))) { acts.push({ do: "ideas", context: (m[2] || settings.biz || "").trim() }); cont = null; }
+      else if (/\bsimplif/.test(t)) { acts.push({ do: "simplify" }); cont = null; }
+      else if ((m = t.match(/\b(?:open|show|go to|jump to)\s+(?:the\s+)?(alfred|home|inbox|orders?|ideas?|revenue|dash(?:board)?|settings)/))) {
+        let tab = m[1]; if (/order/.test(tab)) tab = "orders"; if (/idea/.test(tab)) tab = "ideas"; if (/revenue|dash/.test(tab)) tab = "dash"; if (tab === "home") tab = "alfred";
+        acts.push({ do: "goto", tab }); cont = null;
+      }
+      else if (cont && /^[\w][\w .'&@-]{1,40}$/.test(p) && p.split(/\s+/).length <= 4) {
+        acts.push({ do: cont, match: p });   // "...reply to Henderson and BigBuyer and mom"
+      }
+    }
+    return acts;
+  }
+
+  // ---- model reply: pull a trailing ```alfred-actions block ----
+  function splitActions(reply) {
+    const m = String(reply).match(/```alfred-actions\s*([\s\S]*?)```/i);
+    if (!m) return { prose: reply, actions: null };
+    let actions = null;
+    try { actions = JSON.parse(m[1].trim()); } catch { try { actions = JSON.parse(m[1].replace(/,\s*]/g, "]").trim()); } catch {} }
+    return { prose: reply.replace(m[0], "").trim(), actions: Array.isArray(actions) ? actions : null };
+  }
+
+  // ---- run one action, return a short "done" line ----
+  async function execOne(a) {
+    switch (a.do) {
+      case "brief_inbox":  go("inbox"); return "Miles: " + stripMd(localBrief()).slice(0, 500);
+      case "recap_orders": go("orders"); return "Otto: " + stripMd(localRecap()).slice(0, 500);
+      case "ideas": { const list = localIdeas(a.context || settings.biz); return "Ivy: " + list.slice(0, 3).join("; "); }
+      case "simplify": go("ideas"); return "Ivy: paste the product list on the Ideas tab and I'll run it.";
+      case "goto": go(a.tab); return "opened the " + a.tab + " tab";
+      case "save_idea": if (a.text && !ideas.includes(a.text)) { ideas.push(a.text); persist(); renderSavedIdeas(); } return "saved the idea";
+      case "add_order": {
+        const rec = { id: uid(), item: (a.item || "New order").trim(), vendor: (a.vendor || "").trim(), ref: a.ref || "", status: a.status || "Ordered", shipped: a.shipped || "", eta: a.eta || "", track: a.track || "", notes: a.notes || "" };
+        orders.unshift(rec); persist(); refreshAll();
+        return "added order: " + rec.item + (rec.eta ? " (ETA " + fmtDate(rec.eta) + ")" : "");
+      }
+      case "update_order": {
+        const o = findOrder(a.match); if (!o) return "couldn't find an order matching “" + a.match + "”";
+        Object.assign(o, a.changes || {}); delete o.sample; persist(); refreshAll();
+        return "updated “" + o.item + "”: " + Object.entries(a.changes || {}).map(([k, v]) => k + " → " + v).join(", ");
+      }
+      case "draft_reply": {
+        const matches = a.group ? findEmails(a.match) : findEmails(a.match).slice(0, 1);
+        if (!matches.length) return "couldn't find an email matching “" + a.match + "”";
+        let n = 0;
+        for (const e of matches.slice(0, 6)) {
+          if (e.gid && NATIVE) { await gmailDraftReply(e); n++; }
+          else return "drafting replies needs Gmail linked in the desktop app (Settings → Gmail)";
+        }
+        return "drafted " + n + " repl" + (n === 1 ? "y" : "ies") + " (in your Gmail Drafts to review)";
+      }
+      case "archive": case "trash": {
+        if (!NATIVE) return (a.do === "trash" ? "Trashing" : "Archiving") + " email needs the desktop app with Gmail linked.";
+        const matches = findEmails(a.match);
+        if (!matches.length) return "couldn't find an email matching “" + a.match + "”";
+        let n = 0, cancelled = 0;
+        for (const e of matches.slice(0, 12)) {
+          if (!e.gid) continue;
+          const args = a.do === "trash" ? { id: e.gid, subject: e.subject } : { id: e.gid, remove: ["INBOX"], describe: `Archive "${e.subject}"?` };
+          const res = await NATIVE.gmail[a.do === "trash" ? "trash" : "modify"](args);
+          if (res.ok && !(res.data && res.data.cancelled)) n++;
+          else cancelled++;
+        }
+        await gmailSync(true);
+        return (a.do === "trash" ? "trashed " : "archived ") + n + " email" + (n === 1 ? "" : "s") + (cancelled ? " (" + cancelled + " skipped)" : "");
+      }
+      case "send_email": {
+        if (!NATIVE || !gmailConnected) return "sending needs Gmail linked in the desktop app";
+        const res = await NATIVE.gmail.send({ to: a.to, subject: a.subject || "(no subject)", body: a.body || "" });
+        if (res.ok && res.data && res.data.cancelled) return "you cancelled the send to " + a.to;
+        return res.ok ? "sent to " + a.to : "couldn't send — " + (res.error || "?");
+      }
+    }
+    return null;
+  }
+
+  async function execActions(list) {
+    const done = [];
+    for (const a of list) {
+      try { const r = await execOne(a); if (r) done.push("• " + r); }
+      catch (e) { done.push("• couldn't " + labelFor(a) + " — " + (e.message || e)); }
+    }
+    return done.join("\n") || "Nothing to do there.";
+  }
+
+  // returns a chat string (a plan to approve, or a done summary), or null if no actions
+  async function runPlan(list, opts = {}) {
+    list = (list || []).filter(a => a && ACT[a.do]);
+    if (!list.length) return null;
+    const gated = list.filter(a => ACT[a.do].tier >= 2);
+    if (!opts.approved && (gated.length || list.length > 2)) {
+      pendingPlan = list;
+      const lines = list.map((a, i) => `${i + 1}. ${labelFor(a)}${ACT[a.do].tier >= 2 ? "  — needs your OK" : ""}`);
+      const foot = list.some(a => a.do === "send_email")
+        ? "I'll show you every message in full before it sends."
+        : gated.length
+          ? "The “needs your OK” items change things. Reply **go** to run the plan, or tell me what to change."
+          : "Reply **go** to run it, or adjust.";
+      return "**Here's the plan:**\n" + lines.join("\n") + "\n\n" + foot;
+    }
+    return await execActions(list);
+  }
+
   // compact = true trims the prompt for the small local model
   function alfredSystem(compact) {
     const name = settings.name || "the boss";
@@ -2040,6 +2253,13 @@
       `Business context: ${biz}.`,
       `Be concise — short paragraphs or tight bullets. Never invent an order, email, date or number that isn't in the data; if something's missing, say what you'd need.`,
       `You also built and maintain this application and know it end to end (Gmail via a Google App Password over IMAP, ElevenLabs voices, the auto-updater, local-brain setup, storage). When ${name} reports a problem, diagnose from APP STATUS + the notes, say plainly what's wrong, give numbered steps, and mention they can ask you to run a live check ("test my brain", "test my elevenlabs key", "check for updates", "test gmail").`,
+      ``,
+      `DELEGATION — you can make the team act. When you decide to act, END your reply with a fenced block:`,
+      '```alfred-actions',
+      `[{"do":"draft_reply","match":"Henderson","note":"acknowledge, give a refund timeline"},{"do":"trash","match":"newsletters"}]`,
+      '```',
+      `Valid "do": brief_inbox · recap_orders · ideas{context} · simplify · goto{tab} · draft_reply{match,note} · send_email{to,subject,body} · archive{match} · trash{match} · add_order{item,vendor,eta} · update_order{match,changes} · save_idea{text}. "match" is a name / sender / subject word / "the urgent ones" / "newsletters" / "unread".`,
+      `Rules: only include actions you are confident about. If a reference is ambiguous, or you'd need the recipient or wording, DON'T guess — ask ${name} in the prose part instead. Sending an email is ALWAYS shown to ${name} in full first; trashing/archiving/order changes are confirmed before they run — you don't need to ask separately, the app handles the confirm, but do say what you intend. Keep the prose part to one or two sentences.`,
       `Today is ${new Date().toDateString()}, ${new Date().toLocaleTimeString()}.`,
       ``,
       `APP STATUS:`,

@@ -104,6 +104,19 @@ is the only accent; `--warn` / `--danger` / `--ok` for status.
   explaining the relay that live numbers need.
 - `fmt()` is a tiny escape-first markdown renderer (bold / italic / code / bullets)
   used for all AI and template output.
+- **Delegation.** Alfred can make the team act. `parseCommands(text)` (rule-brain,
+  no model needed) turns plain instructions — split on `and` / `,` / `then` — into an
+  `actions[]` list; a model reply can instead end with a ```alfred-actions``` JSON
+  block that `splitActions()` extracts. `runPlan(list)` shows a numbered plan and
+  parks it in `pendingPlan` when any step is tier ≥ 2 or there are > 2 steps; the
+  next "go" / "cancel" resolves it (anything else = a fresh/adjusted request).
+  `execOne(a)` dispatches: `ACT` maps each `do` to a permission tier —
+  0 just-run (brief_inbox, recap_orders, ideas, simplify, goto),
+  1 run + report (draft_reply, add_order, save_idea),
+  2 confirm (archive, trash, update_order — Gmail writes also hit the native dialog),
+  3 always full-preview (send_email). `findEmails(q)` / `findOrder(q)` resolve
+  "the urgent ones" / "newsletters" / a sender or subject word. Gmail-dependent
+  actions degrade to "needs the desktop app" in the browser build.
 - **Self-troubleshooting.** Alfred knows his own app. `diagnostics()` builds a live
   snapshot (build type, version, internet, storage ok?, brain, voice, ElevenLabs key,
   Gmail method+account, update state, mic support, data counts, last 6 `errLog`
