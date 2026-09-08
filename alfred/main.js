@@ -23,6 +23,7 @@ const path = require("path");
 const fs = require("fs");
 const http = require("http");
 const crypto = require("crypto");
+const { spawn } = require("child_process");
 
 // --- tiny .env loader (dev convenience; .env is gitignored) -----------------
 (function loadDotEnv() {
@@ -74,9 +75,154 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => { createWindow(); setupUpdates(); });
+app.whenReady().then(() => { createWindow(); setupUpdates(); ensureOllamaRunning().catch(() => {}); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+/* ===================== Alfred's local brain (Ollama) =======================
+   Alfred thinks on this machine — no API key, no account, offline-capable.
+   Ollama runs a local server at 127.0.0.1:11434. First-time setup downloads
+   the engine (if missing) and the model, streaming progress to the renderer.
+========================================================================== */
+const OLLAMA = "http://127.0.0.1:11434";
+const BRAIN_MODEL = "qwen2.5:3b";           // Apache-2.0, ~1.9 GB, good on modest hardware
+let ollamaProc = null;
+
+function ollamaExe() {
+  const cands = [
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Ollama", "ollama.exe"),
+    path.join(process.env["ProgramFiles"] || "", "Ollama", "ollama.exe"),
+    path.join(process.env["ProgramFiles(x86)"] || "", "Ollama", "ollama.exe"),
+  ];
+  for (const c of cands) { try { if (c && fs.existsSync(c)) return c; } catch {} }
+  return null;
+}
+async function ollamaUp() {
+  try { const r = await fetch(OLLAMA + "/api/version", { signal: AbortSignal.timeout(2000) }); return r.ok; }
+  catch { return false; }
+}
+async function ensureOllamaRunning() {
+  if (await ollamaUp()) return true;
+  const exe = ollamaExe();
+  if (!exe) return false;
+  try { ollamaProc = spawn(exe, ["serve"], { detached: true, stdio: "ignore", windowsHide: true }); ollamaProc.unref(); }
+  catch { return false; }
+  for (let i = 0; i < 40; i++) { if (await ollamaUp()) return true; await new Promise(r => setTimeout(r, 500)); }
+  return false;
+}
+async function ollamaHasModel(name = BRAIN_MODEL) {
+  try {
+    const r = await fetch(OLLAMA + "/api/tags");
+    if (!r.ok) return false;
+    const j = await r.json();
+    const stem = name.split(":")[0];
+    return (j.models || []).some(m => m.name === name || m.name === stem || m.name.startsWith(stem + ":"));
+  } catch { return false; }
+}
+async function brainStatus() {
+  const engineInstalled = !!ollamaExe();
+  const running = await ollamaUp();
+  const hasModel = running ? await ollamaHasModel() : false;
+  return { engineInstalled, running, hasModel, model: BRAIN_MODEL, ready: running && hasModel };
+}
+function brainProgress(p) { if (win && !win.isDestroyed()) win.webContents.send("brain:progress", p); }
+
+async function downloadFile(url, dest, phase) {
+  const r = await fetch(url, { redirect: "follow" });
+  if (!r.ok || !r.body) throw new Error("download failed (" + r.status + ")");
+  const total = Number(r.headers.get("content-length")) || 0;
+  const ws = fs.createWriteStream(dest);
+  const reader = r.body.getReader();
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    ws.write(Buffer.from(value)); got += value.length;
+    if (total) brainProgress({ phase, state: "downloading", pct: Math.round(got / total * 100) });
+  }
+  ws.end();
+  await new Promise((res, rej) => { ws.on("close", res); ws.on("error", rej); });
+}
+
+async function brainSetup() {
+  try {
+    let exe = ollamaExe();
+    if (!exe) {
+      const proceed = (await dialog.showMessageBox(win, {
+        type: "question", buttons: ["Cancel", "Set up"], defaultId: 1, cancelId: 0, noLink: true,
+        title: "Set up Alfred's brain",
+        message: "Give Alfred a brain that runs on this computer — no API key, no account, works offline.",
+        detail: "This installs the local AI engine (Ollama, ~1 GB from ollama.com) and downloads Alfred's model (~1.9 GB). One time. It'll take a few minutes on a normal connection.",
+      })).response === 1;
+      if (!proceed) return { ok: false, error: "cancelled" };
+      brainProgress({ phase: "engine", state: "downloading", pct: 0 });
+      const installer = path.join(app.getPath("temp"), "OllamaSetup.exe");
+      await downloadFile("https://ollama.com/download/OllamaSetup.exe", installer, "engine");
+      brainProgress({ phase: "engine", state: "installing" });
+      await new Promise((res, rej) => {
+        const p = spawn(installer, ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"], { windowsHide: true });
+        p.on("exit", code => code === 0 ? res() : rej(new Error("the Ollama installer stopped (code " + code + "). Try running it yourself from ollama.com.")));
+        p.on("error", rej);
+      });
+      for (let i = 0; i < 20 && !exe; i++) { await new Promise(r => setTimeout(r, 500)); exe = ollamaExe(); }
+      if (!exe) throw new Error("Ollama installed but Alfred can't find it — restart Alfred and try again.");
+    }
+    brainProgress({ phase: "engine", state: "starting" });
+    if (!await ensureOllamaRunning()) throw new Error("Ollama is installed but wouldn't start. Restart the computer and try again.");
+    if (!await ollamaHasModel()) {
+      brainProgress({ phase: "model", state: "downloading", pct: 0, note: "starting" });
+      const r = await fetch(OLLAMA + "/api/pull", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: BRAIN_MODEL, stream: true }),
+      });
+      if (!r.ok || !r.body) throw new Error("couldn't start the model download (" + r.status + ")");
+      const reader = r.body.getReader();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += Buffer.from(value).toString("utf8");
+        const lines = buf.split("\n"); buf = lines.pop();
+        for (const ln of lines) {
+          if (!ln.trim()) continue;
+          let j; try { j = JSON.parse(ln); } catch { continue; }
+          if (j.error) throw new Error(j.error);
+          if (j.total && j.completed) brainProgress({ phase: "model", state: "downloading", pct: Math.round(j.completed / j.total * 100), note: j.status });
+          else if (j.status) brainProgress({ phase: "model", state: "downloading", note: j.status });
+        }
+      }
+    }
+    brainProgress({ phase: "done", state: "ready" });
+    return { ok: true, status: await brainStatus() };
+  } catch (e) {
+    brainProgress({ phase: "error", state: "error", error: String(e.message || e) });
+    return { ok: false, error: String(e.message || e) };
+  }
+}
+
+async function brainChat({ system, messages }) {
+  if (!await ensureOllamaRunning()) return { ok: false, error: "NOT_READY" };
+  if (!await ollamaHasModel()) return { ok: false, error: "NOT_READY" };
+  const msgs = [];
+  if (system) msgs.push({ role: "system", content: String(system) });
+  for (const m of messages || []) msgs.push({ role: m.role === "assistant" ? "assistant" : "user", content: String(m.content) });
+  try {
+    const r = await fetch(OLLAMA + "/api/chat", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: BRAIN_MODEL, messages: msgs, stream: false, options: { temperature: 0.6, num_ctx: 8192 } }),
+      signal: AbortSignal.timeout(180000),
+    });
+    if (!r.ok) return { ok: false, error: "brain returned " + r.status };
+    const j = await r.json();
+    return { ok: true, text: ((j.message && j.message.content) || "").trim() };
+  } catch (e) {
+    return { ok: false, error: String(e.name === "TimeoutError" ? "the brain took too long — the model may still be loading, try again" : (e.message || e)) };
+  }
+}
+
+ipcMain.handle("brain:status", () => brainStatus());
+ipcMain.handle("brain:setup",  () => brainSetup());
+ipcMain.handle("brain:chat",   (_e, a) => brainChat(a || {}));
 
 /* ===================== auto-update (electron-updater + GitHub Releases) =====
    The renderer shows a card on the Alfred home tab. On launch we check once and

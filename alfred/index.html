@@ -656,11 +656,21 @@
         </div>
 
         <div class="panel">
-          <h2>Alfred's brain <span class="who">Claude</span></h2>
-          <p class="sub">Without a key, Alfred runs a capable offline brain over your own data. Add a key and he answers freely.</p>
-          <div class="field"><label>Anthropic API key</label><input id="setAnthropic" type="password" placeholder="sk-ant-…" autocomplete="off"></div>
-          <div class="field"><label>Model</label><input id="setModel" placeholder="claude-sonnet-5"></div>
-          <p class="foot faint">Stored only in this browser. Calls go straight from this page to Anthropic. Use a key with a low spending cap.</p>
+          <h2>Alfred's brain</h2>
+          <p class="sub" id="brainStatus">Checking…</p>
+          <div id="brainSetupWrap" hidden>
+            <p class="foot faint" style="margin-bottom:8px">Give Alfred a brain that runs on this computer — no API key, no account, works offline. One-time download (~1 GB engine + ~1.9 GB model).</p>
+            <button class="btn primary sm" id="brainSetupBtn">Set up Alfred's brain</button>
+            <div id="brainProgress" class="foot" style="margin-top:10px" hidden></div>
+          </div>
+          <details id="cloudBrain" style="margin-top:12px">
+            <summary class="muted" style="cursor:pointer;font-size:12.5px">Advanced: use a cloud model instead</summary>
+            <div style="margin-top:10px">
+              <div class="field"><label>Anthropic API key</label><input id="setAnthropic" type="password" placeholder="sk-ant-…" autocomplete="off"></div>
+              <div class="field"><label>Model</label><input id="setModel" placeholder="claude-sonnet-5"></div>
+              <p class="foot faint">Stored on this device only. Calls go straight to Anthropic; costs a few cents per chat. If set, this is used instead of the local brain.</p>
+            </div>
+          </details>
           <hr class="sep">
           <h2>ElevenLabs voices</h2>
           <div class="field"><label>ElevenLabs API key</label><input id="setEleven" type="password" placeholder="sk_…" autocomplete="off"></div>
@@ -1727,9 +1737,14 @@
     chatLog.append(typing); chatLog.scrollTop = chatLog.scrollHeight;
 
     let reply;
-    reply = await maybeAppHelp(text);                       // app diagnostics / live checks (both modes)
-    if (!reply && settings.anthropic) {
+    reply = await maybeAppHelp(text);                       // app diagnostics / live checks
+    if (!reply && settings.anthropic) {                     // advanced: cloud model, if a key is set
       reply = await askClaude(alfredSystem(), null, chat.slice(-16));
+    }
+    if (!reply && brainReady && NATIVE && NATIVE.brain) {   // Alfred's own local brain
+      const r = await NATIVE.brain.chat({ system: alfredSystem(true), messages: chat.slice(-10) });
+      if (r.ok && r.text) reply = r.text;
+      else if (r.error && r.error !== "NOT_READY") fixCard("Alfred's brain hiccuped", [r.error, "Falling back to the basic brain for this one. Try again in a moment."], "warn", { once: null, autohide: true });
     }
     if (!reply) reply = localAlfred(text);
     typing.remove();
@@ -1805,7 +1820,9 @@
       "Version":     appVersion || (NATIVE ? "?" : "web"),
       "Internet":    navigator.onLine ? "connected" : "NO — offline",
       "Saving data": storeBlocked ? "BLOCKED — changes won't survive a reload" : "working",
-      "Alfred's brain": settings.anthropic ? ("AI — model " + (settings.model || "?")) : "offline brain (no Anthropic key)",
+      "Alfred's brain": settings.anthropic ? ("cloud AI — " + (settings.model || "?"))
+        : brainReady ? ("local AI — " + ((brainInfo && brainInfo.model) || "on this machine"))
+        : "basic rule-brain (local AI not set up)",
       "Voice":       !settings.voice ? "OFF"
         : settings.eleven ? ("on — ElevenLabs" + (settings.elevenVoice ? "" : " (no voice id chosen!)"))
         : "on — computer voice (no ElevenLabs key)",
@@ -1864,14 +1881,15 @@
         "If it errors it's usually no internet — say 'test my connection'.",
       ],
       live: d => "Updates: " + d["Updates"] + "." },
-    { check: "anthropic",
-      match: /anthropic|claude|smarter|own words|free.?form|ai (mode|key|brain)|api key/,
-      title: "Making Alfred smarter (AI mode)",
-      why: "Without an Anthropic API key I run an offline brain — fine for briefs, orders, ideas and this troubleshooting, but not open conversation.",
+    { check: "brain",
+      match: /brain|smarter|own words|free.?form|think(ing)?|dumb|basic|local (ai|model)|ollama|anthropic|claude|ai (mode|key)|api key/,
+      title: "Alfred's brain — making him think for himself",
+      why: "Out of the box I run a basic rule-brain (fine for briefs, orders, ideas, troubleshooting). For real conversation I use a model that runs on this computer — no key, no account, works offline. It's a one-time download.",
       steps: [
-        "console.anthropic.com → API keys → create one, set a low monthly cap.",
-        "Alfred → Settings → Alfred's brain → paste the key (starts with 'sk-ant-').",
-        "Say 'test my anthropic key' and I'll confirm it.",
+        "Settings → Alfred's brain → 'Set up Alfred's brain'.",
+        "It downloads the engine (~1 GB) and the model (~1.9 GB) once, with a progress bar.",
+        "After that I think locally. Say 'test my brain' and I'll confirm it's live.",
+        "(Advanced: if you'd rather use a cloud model, there's an Anthropic key field under 'Advanced' in the same panel.)",
       ],
       live: d => "My brain is currently: " + d["Alfred's brain"] + "." },
     { match: /won'?t (open|start|launch)|smartscreen|windows protected|application control|blocked this (file|app)/,
@@ -1918,8 +1936,16 @@
         const s = j.subscription;
         return "**ElevenLabs:** key works. " + (s ? `${s.tier} plan, ${s.character_count}/${s.character_limit} characters used.` : "");
       }
+      if (name === "brain") {
+        if (settings.anthropic) return await runCheck("anthropic");
+        if (!NATIVE || !NATIVE.brain) return "**Brain:** the local AI is a desktop-app feature. In the browser I'm on the basic rule-brain.";
+        const s = await NATIVE.brain.status();
+        if (s.ready) return "**Brain:** local AI is live (" + (s.model || "on this machine") + "). No key, works offline.";
+        if (s.engineInstalled) return "**Brain:** engine's installed but the model isn't downloaded. Settings → Alfred's brain → download it.";
+        return "**Brain:** not set up — I'm on the basic rule-brain. Settings → Alfred's brain → 'Set up Alfred's brain' (one-time download).";
+      }
       if (name === "anthropic") {
-        if (!settings.anthropic) return "**Anthropic:** no key set — I'm on the offline brain. Add one in Settings → Alfred's brain for full conversation.";
+        if (!settings.anthropic) return "**Anthropic:** no cloud key set (that's fine — it's optional). Alfred's brain is " + diagnostics()["Alfred's brain"] + ".";
         const r = await fetch("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: { "content-type": "application/json", "x-api-key": settings.anthropic, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
@@ -1950,7 +1976,7 @@
     return null;
   }
   async function fullHealthCheck() {
-    const names = ["internet", "storage", "anthropic", "eleven", "gmail"];
+    const names = ["internet", "storage", "brain", "eleven", "gmail"];
     if (NATIVE && NATIVE.updates) names.push("updates");
     const out = [];
     for (const n of names) { try { const r = await runCheck(n); if (r) out.push(r); } catch {} }
@@ -1961,6 +1987,7 @@
     const t = text.toLowerCase();
     if (!/\b(test|check|run|verify|try|ping)\b/.test(t)) return null;
     if (/eleven ?labs|11labs|voice ?id|tts/.test(t))                 return runCheck("eleven");
+    if (/\bbrain\b|local ai|ollama|think(ing)?/.test(t))             return runCheck("brain");
     if (/anthropic|claude|ai key/.test(t))                           return runCheck("anthropic");
     if (/gmail|imap|inbox|e-?mail (connection|link|access)/.test(t)) return runCheck("gmail");
     if (/updat|new version/.test(t))                                 return runCheck("updates");
@@ -1981,7 +2008,7 @@
     if (settings.anthropic) return null;                     // let Claude field nuanced questions (it has the diagnostics + KB)
     const trouble = /\b(not working|won'?t|can'?t|cannot|couldn'?t|isn'?t|aren'?t|doesn'?t|didn'?t|wasn'?t|broke|broken|error|failed|failing|stuck|fix|troubleshoot|greyed|grayed|frozen|stopped|dead|glitch|silent|no sound|smartscreen|windows protected|keeps?|not sav\w*|nothing happens)\b/.test(t);
     const howto = /\bhow (do|can|to|does)\b|\bhow('?s| is)\b.*\bwork|\bset ?up\b|\bre-?connect\b|\benable\b|\bturn on\b|\bwhere (do|is|are)\b/.test(t);
-    const aboutApp = /(gmail|e-?mail|imap|inbox|voice|speak|eleven ?labs|tts|sound|audio|\bmic\b|microphone|dictation|sav\w*|storage|persist\w*|updat\w*|version|smartscreen|install\w*|anthropic|api key|claude|the app|applicat\w*|alfred|the program|revenuecat)/.test(t);
+    const aboutApp = /(gmail|e-?mail|imap|inbox|voice|speak|eleven ?labs|tts|sound|audio|\bmic\b|microphone|dictation|sav\w*|storage|persist\w*|updat\w*|version|smartscreen|install\w*|anthropic|api key|claude|the app|applicat\w*|alfred|the program|revenuecat|brain|smart\w*|think\w*|local ai|ollama|dumb)/.test(t);
     if ((trouble || howto) && aboutApp) {
       const hit = APP_KB.find(k => k.match.test(t));
       const d = diagnostics();
@@ -1997,33 +2024,33 @@
     return null;
   }
 
-  function alfredSystem() {
+  // compact = true trims the prompt for the small local model
+  function alfredSystem(compact) {
     const name = settings.name || "the boss";
     const biz = settings.biz || "a small business doing wholesaling and customer service";
+    const kb = compact
+      ? APP_KB.map(k => `• ${k.title} — Fix: ${k.steps[0]}`).join("\n")
+      : APP_KB.map(k => `• ${k.title} — ${k.why} Fix: ${k.steps.join(" ")}`).join("\n");
+    const emailData = JSON.stringify(emails.slice(0, compact ? 12 : 30).map(e => (gmailConnected && !aiAlways)
+      ? ({ from: e.from, subject: e.subject, read: !!e.read })
+      : ({ from: e.from, subject: e.subject, body: (e.body || "").slice(0, compact ? 140 : 300), read: !!e.read })));
     return [
-      `You are Alfred, a warm, unflappable British chief of staff for ${name}.`,
-      `Your job: make ${name}'s life easier. You run a small team and speak for them:`,
-      `- Miles handles email. Otto tracks orders & shipping. Ivy handles ideas & product strategy.`,
-      `When a request belongs to a teammate, answer it yourself using the live data below and attribute briefly ("Otto's read:", "Miles flagged...").`,
+      `You are Alfred, a warm, unflappable British chief of staff for ${name}. Make ${name}'s life easier.`,
+      `You run a small team and speak for them: Miles handles email, Otto tracks orders & shipping, Ivy handles ideas & product strategy. When a request belongs to a teammate, answer it yourself from the data below and attribute briefly ("Otto's read:", "Miles flagged...").`,
       `Business context: ${biz}.`,
-      `Be concise — this is a dashboard. Short paragraphs or tight bullets. Never invent an order, email, date or number that isn't in the data. If something's missing, say what you'd need.`,
-      ``,
-      `YOU ALSO BUILT AND MAINTAIN THIS APPLICATION and know it end to end — Gmail setup (a Google App Password over IMAP, or Google sign-in), the ElevenLabs voices, the auto-updater, and browser storage. When ${name} asks about the app or reports a problem: diagnose from APP STATUS below plus the troubleshooting notes, say plainly what's wrong, give numbered fix steps, and remind them they can ask you to run a live check — e.g. "test my elevenlabs key", "check for updates", "test gmail", "test my connection".`,
-      `Today is ${new Date().toDateString()}, local time ${new Date().toLocaleTimeString()}.`,
+      `Be concise — short paragraphs or tight bullets. Never invent an order, email, date or number that isn't in the data; if something's missing, say what you'd need.`,
+      `You also built and maintain this application and know it end to end (Gmail via a Google App Password over IMAP, ElevenLabs voices, the auto-updater, local-brain setup, storage). When ${name} reports a problem, diagnose from APP STATUS + the notes, say plainly what's wrong, give numbered steps, and mention they can ask you to run a live check ("test my brain", "test my elevenlabs key", "check for updates", "test gmail").`,
+      `Today is ${new Date().toDateString()}, ${new Date().toLocaleTimeString()}.`,
       ``,
       `APP STATUS:`,
       diagText(),
       ``,
       `APP TROUBLESHOOTING NOTES:`,
-      APP_KB.map(k => `• ${k.title} — ${k.why} Fix: ${k.steps.join(" ")}`).join("\n"),
+      kb,
       ``,
       `LIVE DATA (JSON):`,
-      `orders = ${JSON.stringify(orders.map(o => ({ item:o.item, vendor:o.vendor, ref:o.ref, status:o.status, shipped:o.shipped, eta:o.eta, notes:o.notes })))}`,
-      // subjects + senders flow freely; email body/preview text only goes to the API
-      // after an explicit "yes" (the Brief me button asks). aiAlways lifts that.
-      `emails = ${JSON.stringify(emails.map(e => (gmailConnected && !aiAlways)
-        ? ({ from:e.from, subject:e.subject, read:!!e.read })
-        : ({ from:e.from, subject:e.subject, body:(e.body||"").slice(0,300), read:!!e.read })))}`,
+      `orders = ${JSON.stringify(orders.map(o => ({ item: o.item, vendor: o.vendor, ref: o.ref, status: o.status, shipped: o.shipped, eta: o.eta, notes: o.notes })))}`,
+      `emails = ${emailData}`,
       `saved_ideas = ${JSON.stringify(ideas)}`,
     ].join("\n");
   }
@@ -2038,10 +2065,10 @@
     if (/inbox|email|mail|message/.test(t)) { go("inbox"); return "Miles flagged this:\n\n" + localBrief(); }
     if (/idea|suggest|grow|improve|strategy|simplif/.test(t)) { go("ideas"); return "Ivy's shortlist:\n\n- " + localIdeas(settings.biz).join("\n- "); }
     if (/help|what can you|who are you|features/.test(t))
-      return `I'm Alfred${name}. I keep the day together and hand work to the team:\n\n- **Miles** — email: "summarize my inbox"\n- **Otto** — orders: "where are my orders"\n- **Ivy** — ideas: "give me 3 ideas" / "simplify my products"\n\nI also run this application itself — ask me if something's broken ("Gmail won't connect", "voice isn't working") or say **"health check"** and I'll scan everything. I can run live checks too: "test my elevenlabs key", "check for updates".\n\nAdd an Anthropic key in **Settings** and I'll answer anything in my own words.`;
+      return `I'm Alfred${name}. I keep the day together and hand work to the team:\n\n- **Miles** — email: "summarize my inbox"\n- **Otto** — orders: "where are my orders"\n- **Ivy** — ideas: "give me 3 ideas" / "simplify my products"\n\nI also run this application — ask me if something's broken ("Gmail won't connect", "voice isn't working") or say **"health check"**. I can run live checks: "test my brain", "test my elevenlabs key", "check for updates".\n\nFor real back-and-forth conversation, set me up with my own local brain in **Settings → Alfred's brain** — one download, no key.`;
     if (/thank|cheers|nice one/.test(t)) return "Always. What's next?";
     // fallback
-    return `I've noted that${name}. My offline brain handles: **morning brief**, **order status**, **inbox summary**, **ideas**, and **fixing the app** ("something's wrong", "health check", "test gmail"). For open-ended questions, add an Anthropic API key in **Settings → Alfred's brain** (console.anthropic.com → API keys) and I'll take it from there.`;
+    return `I've noted that${name}. Right now I'm on the **basic brain** — I handle **morning brief**, **order status**, **inbox summary**, **ideas**, and **fixing the app** ("something's wrong", "health check", "test gmail").\n\nFor open-ended questions, give me my own brain: **Settings → Alfred's brain → Set up Alfred's brain**. One-time download, then I think for myself on this machine — no key, works offline.`;
   }
   function localMorningBrief() {
     const unread = emails.filter(e => !e.read).length;
@@ -2340,8 +2367,9 @@
   =================================================================== */
   function updateModeChip() {
     const chip = $("#modeChip");
-    if (settings.anthropic) { chip.textContent = "Alfred: AI"; chip.classList.add("live"); }
-    else { chip.textContent = "Local mode"; chip.classList.remove("live"); }
+    if (settings.anthropic)      { chip.textContent = "Alfred: cloud AI"; chip.classList.add("live"); }
+    else if (brainReady)         { chip.textContent = "Alfred: local AI"; chip.classList.add("live"); }
+    else                         { chip.textContent = "Basic mode";       chip.classList.remove("live"); }
   }
   function setTag(name, n) {
     const t = $(`[data-tag="${name}"]`);
@@ -2415,6 +2443,83 @@
   }
 
   /* ===================================================================
+     Alfred's local brain (Ollama) — Settings panel + status
+  =================================================================== */
+  let brainReady = false, brainInfo = null;
+
+  function renderBrainSettings(s) {
+    brainInfo = s || brainInfo;
+    const st = $("#brainStatus"), wrap = $("#brainSetupWrap"), btn = $("#brainSetupBtn");
+    if (!NATIVE || !NATIVE.brain) {
+      st.textContent = settings.anthropic
+        ? "Using a cloud model (Anthropic key set)."
+        : "This is the browser version — Alfred runs a basic rule-based brain here. The local AI is in the desktop app.";
+      wrap.hidden = true;
+      return;
+    }
+    if (settings.anthropic) {
+      st.textContent = "Using a cloud model (Anthropic key set). Remove it below to use the local brain.";
+      wrap.hidden = true;
+      return;
+    }
+    const s2 = brainInfo || {};
+    if (s2.ready) {
+      st.textContent = "Ready — Alfred is thinking locally (" + (s2.model || "local model") + "). No key, works offline.";
+      wrap.hidden = false; btn.textContent = "Re-run setup"; btn.classList.remove("primary");
+    } else if (s2.engineInstalled) {
+      st.textContent = "Engine installed, but Alfred's model isn't downloaded yet.";
+      wrap.hidden = false; btn.textContent = "Download Alfred's brain (~1.9 GB)"; btn.classList.add("primary");
+    } else {
+      st.textContent = "Not set up — Alfred is on the basic brain. One download gives him his own AI.";
+      wrap.hidden = false; btn.textContent = "Set up Alfred's brain"; btn.classList.add("primary");
+    }
+  }
+
+  async function initBrain() {
+    if (!NATIVE || !NATIVE.brain) { renderBrainSettings(); return; }
+    NATIVE.brain.onProgress(p => {
+      const box = $("#brainProgress");
+      box.hidden = false;
+      if (p.state === "error") { box.textContent = "⚠ " + (p.error || "setup failed"); $("#brainSetupBtn").disabled = false; return; }
+      if (p.phase === "done") {
+        box.textContent = "✓ Done — Alfred is thinking locally now.";
+        brainReady = true; updateModeChip();
+        NATIVE.brain.status().then(renderBrainSettings);
+        return;
+      }
+      const label = p.phase === "engine"
+        ? (p.state === "installing" ? "Installing the AI engine…" : p.state === "starting" ? "Starting the engine…" : "Downloading the AI engine")
+        : "Downloading Alfred's model" + (p.note && p.note !== "success" ? " (" + p.note + ")" : "");
+      box.textContent = label + (typeof p.pct === "number" ? " — " + p.pct + "%" : "…");
+    });
+    try {
+      const s = await NATIVE.brain.status();
+      brainReady = !!s.ready;
+      renderBrainSettings(s);
+      updateModeChip();
+    } catch { renderBrainSettings(); }
+  }
+
+  $("#brainSetupBtn").addEventListener("click", async () => {
+    if (!NATIVE || !NATIVE.brain) return;
+    $("#brainSetupBtn").disabled = true;
+    $("#brainProgress").hidden = false;
+    $("#brainProgress").textContent = "Starting…";
+    const r = await NATIVE.brain.setup();
+    $("#brainSetupBtn").disabled = false;
+    if (!r.ok && r.error !== "cancelled") {
+      fixCard("Couldn't set up Alfred's brain", [
+        r.error || "Unknown error.",
+        "You can also install it yourself: get Ollama from ollama.com, then reopen this and press the button again.",
+        "Meanwhile Alfred uses the basic brain — nothing's broken.",
+      ], "warn", { once: null, autohide: false });
+    } else if (r.ok) {
+      brainReady = true; updateModeChip();
+      NATIVE.brain.status().then(renderBrainSettings);
+    }
+  });
+
+  /* ===================================================================
      Boot
   =================================================================== */
   loadSettingsForm();
@@ -2426,6 +2531,7 @@
   go(store.get("tab", "alfred"));
   if (NATIVE || SERVED) gmailBoot();
   initUpdates();
+  initBrain();
 
   // greet — once we know voices are likely ready
   function bootGreeting() {

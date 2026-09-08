@@ -61,12 +61,17 @@ on `:root` — no light override and `<meta name="color-scheme" content="dark">`
 ignores the OS setting (deliberate: it's a console, not a document). Cyan (`--accent`)
 is the only accent; `--warn` / `--danger` / `--ok` for status.
 
-- **Two brains for Alfred.** With no Anthropic key, `localAlfred()` intent-routes the
-  message (brief / orders / inbox / ideas / help) and answers from local data. With a
-  key in Settings, `askClaude()` POSTs directly to `api.anthropic.com/v1/messages`
-  from the browser (`anthropic-dangerous-direct-browser-access: true`); on any failure
-  it falls back to the local brain. Each employee tab (Brief me / recap / ideas /
-  simplify) works the same way — AI path first, local template fallback.
+- **Alfred's brain — three tiers, tried in order** in `sendChat`: (1) `maybeAppHelp`
+  (diagnostics / live checks); (2) cloud model if an Anthropic key is set
+  (`askClaude()` → `api.anthropic.com`, kept under Settings → "Advanced"); (3) the
+  **local model** — desktop app only, `NATIVE.brain.chat()` → Ollama on
+  `127.0.0.1:11434` running `qwen2.5:3b`, no key, offline; (4) `localAlfred()`
+  rule-brain fallback (brief / orders / inbox / ideas / help / troubleshooting).
+  `alfredSystem(compact)` trims the prompt (KB → titles, fewer emails) for the small
+  local model; the local call uses `compact=true` + `num_ctx:8192`. `#modeChip` shows
+  "Alfred: cloud AI" / "Alfred: local AI" / "Basic mode". Employee tabs (Brief me /
+  recap / ideas / simplify) still do AI-if-key-else-template and do **not** use the
+  local model yet.
 - **State** is all in `localStorage` under `alfred:*` keys (`settings`, `orders`,
   `emails`, `ideas`, `chat`, `tab`). `orders`/`emails` seed with clearly-tagged
   sample rows on first run. Every `store.set` is wrapped — a storage failure raises a
@@ -113,6 +118,21 @@ is the only accent; `--warn` / `--danger` / `--ok` for status.
   snapshot + condensed KB so Claude troubleshoots conversationally. UI: a "Health
   check" quick chip and Settings → Backup → "Copy diagnostics" (plain text, no
   secrets).
+
+#### alfred — local brain (Ollama)
+
+`main.js` bundles no model — it drives a local **Ollama** server. `ollamaExe()` looks
+in the standard per-user install paths; `ensureOllamaRunning()` `spawn`s
+`ollama serve` if `/api/version` is down (also fired once on app launch).
+`brainSetup()` is the first-run wizard: a confirm dialog, then (if the engine is
+missing) download `OllamaSetup.exe` from ollama.com and run it
+`/VERYSILENT`, then `POST /api/pull` (`stream:true`) for `qwen2.5:3b`, streaming
+`{completed,total}` progress to the renderer over `brain:progress`. `brainChat()` →
+`POST /api/chat` (`stream:false`, 180s timeout). IPC: `brain:status|setup|chat`.
+Renderer: `initBrain()` + `renderBrainSettings()` drive Settings → "Alfred's brain"
+(`#brainSetupBtn` / `#brainProgress`); `brainReady` gates tier 3 in `sendChat` and the
+`#modeChip`. `runCheck("brain")` and an `APP_KB` entry cover "test my brain" / "how do
+I make you smarter". Browser build has no `NATIVE.brain` — stays on the rule-brain.
 
 #### alfred — Electron / Gmail layer
 

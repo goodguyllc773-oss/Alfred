@@ -27,4 +27,10 @@ contextBridge.exposeInMainWorld("alfredNative", {
     version:      () => ipcRenderer.invoke("update:version"),
     openReleases: () => ipcRenderer.invoke("update:openReleases"),
   },
+  brain: {
+    status:     () => ipcRenderer.invoke("brain:status"),
+    setup:      () => ipcRenderer.invoke("brain:setup"),
+    chat:       (a) => ipcRenderer.invoke("brain:chat", a),
+    onProgress: (cb) => ipcRenderer.on("brain:progress", (_e, p) => cb(p)),
+  },
 });
