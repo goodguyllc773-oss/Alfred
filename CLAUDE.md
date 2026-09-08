@@ -99,6 +99,20 @@ is the only accent; `--warn` / `--danger` / `--ok` for status.
   explaining the relay that live numbers need.
 - `fmt()` is a tiny escape-first markdown renderer (bold / italic / code / bullets)
   used for all AI and template output.
+- **Self-troubleshooting.** Alfred knows his own app. `diagnostics()` builds a live
+  snapshot (build type, version, internet, storage ok?, brain, voice, ElevenLabs key,
+  Gmail method+account, update state, mic support, data counts, last 6 `errLog`
+  entries — every `fixCard()` is logged there). `APP_KB` is a symptom→cause→steps
+  table (Gmail / voice / storage / updates / AI key / SmartScreen / mic), each entry
+  with an optional `live(d)` line and a `check` name. `maybeAppHelp(text)` runs in
+  `sendChat` before either brain: `handleCheckCommand` catches "test/check X" and runs
+  `runCheck()` (live probes of internet / storage / voice / ElevenLabs / Anthropic /
+  Gmail / updates) in **both** modes; "health check" → `fullHealthCheck()`; otherwise,
+  only in no-key mode, a `trouble|howto` + `aboutApp` match returns the KB entry
+  personalised with diagnostics. With a key, `alfredSystem()` carries the diagnostics
+  snapshot + condensed KB so Claude troubleshoots conversationally. UI: a "Health
+  check" quick chip and Settings → Backup → "Copy diagnostics" (plain text, no
+  secrets).
 
 #### alfred — Electron / Gmail layer
 

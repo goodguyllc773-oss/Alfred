@@ -456,6 +456,7 @@
             <button data-q="Where are my orders and when do they arrive?">Order status</button>
             <button data-q="Summarize my inbox and flag anything urgent">Summarize inbox</button>
             <button data-q="Give me 3 business ideas I could act on this week">3 ideas</button>
+            <button data-q="Run a full health check on the app">Health check</button>
           </div>
           <div class="chat">
             <div class="chat-log" id="chatLog"></div>
@@ -690,6 +691,7 @@
         <div class="inline">
           <button class="btn sm" id="exportData">Export a backup file</button>
           <button class="btn sm" id="importData">Import a backup file</button>
+          <button class="btn sm" id="copyDiag">Copy diagnostics</button>
           <input type="file" id="importFile" accept="application/json" hidden>
         </div>
         <p class="foot faint" id="backupNote" style="margin-top:8px">Includes your settings, orders, saved emails, ideas and chat. API keys are included — keep the file private.</p>
@@ -823,7 +825,10 @@
      Fix cards — "whenever something goes wrong, step-by-step"
   =================================================================== */
   const shownFixKeys = new Set();
+  const errLog = []; // rolling record so Alfred can say "the error you got 3 min ago"
   function fixCard(title, steps, kind = "warn", opts = {}) {
+    errLog.push({ t: Date.now(), title, kind });
+    if (errLog.length > 25) errLog.shift();
     if (opts.once) { if (shownFixKeys.has(opts.once)) return; shownFixKeys.add(opts.once); }
     const card = el("div", { class: "fix " + (kind === "err" ? "err" : kind === "info" ? "info" : "") }, [
       el("h4", {}, [
@@ -1332,6 +1337,7 @@
     let st;
     try { st = await GM.status(); } catch { st = { connected: false }; }
     gmailConnected = !!st.connected;
+    gmailMethod = st.method || ""; gmailEmail = st.email || "";
     const setup = !st.connected;
 
     $("#gBrowserBlock").hidden = NATIVE || !setup;
@@ -1719,7 +1725,8 @@
     chatLog.append(typing); chatLog.scrollTop = chatLog.scrollHeight;
 
     let reply;
-    if (settings.anthropic) {
+    reply = await maybeAppHelp(text);                       // app diagnostics / live checks (both modes)
+    if (!reply && settings.anthropic) {
       reply = await askClaude(alfredSystem(), null, chat.slice(-16));
     }
     if (!reply) reply = localAlfred(text);
@@ -1774,6 +1781,220 @@
     });
   }
 
+  /* ===================================================================
+     App self-knowledge — Alfred can see the running app and fix it
+  =================================================================== */
+  let appVersion = NATIVE ? "" : "web";
+  let lastUpdate = null;              // latest {state,version?,error?} from the updater
+  let gmailMethod = "", gmailEmail = "";
+  if (NATIVE && NATIVE.updates) NATIVE.updates.version().then(v => { appVersion = v || ""; });
+
+  const updWord = u => !u ? "not checked yet" :
+    u.state === "current"     ? "up to date" :
+    u.state === "available"   ? "update available: v" + u.version :
+    u.state === "ready"       ? "update v" + u.version + " downloaded — restart to apply" :
+    u.state === "downloading" ? "downloading update…" :
+    u.state === "error"       ? "last check failed (" + (u.error || "?") + ")" :
+    u.state === "dev"         ? "dev build (no updates)" : u.state;
+
+  function diagnostics() {
+    return {
+      "Running as":  NATIVE ? "desktop app" : (SERVED ? "browser (served)" : "browser (opened as a file)"),
+      "Version":     appVersion || (NATIVE ? "?" : "web"),
+      "Internet":    navigator.onLine ? "connected" : "NO — offline",
+      "Saving data": storeBlocked ? "BLOCKED — changes won't survive a reload" : "working",
+      "Alfred's brain": settings.anthropic ? ("AI — model " + (settings.model || "?")) : "offline brain (no Anthropic key)",
+      "Voice":       !settings.voice ? "OFF"
+        : settings.eleven ? ("on — ElevenLabs" + (settings.elevenVoice ? "" : " (no voice id chosen!)"))
+        : "on — computer voice (no ElevenLabs key)",
+      "ElevenLabs key": settings.eleven ? "set" : "not set",
+      "Gmail":       gmailConnected ? (gmailMethod + (gmailEmail ? " · " + gmailEmail : "")) : "not connected",
+      "Updates":     NATIVE ? updWord(lastUpdate) : "n/a (web version)",
+      "Mic (talk to Alfred)": (window.SpeechRecognition || window.webkitSpeechRecognition) ? "supported here" : "not in this browser",
+      "Your data":   `${orders.length} orders, ${emails.length} emails, ${ideas.length} saved ideas`,
+    };
+  }
+  function diagText(d = diagnostics()) {
+    const rows = Object.entries(d).map(([k, v]) => `- **${k}:** ${v}`);
+    const recent = errLog.slice(-6).map(e => `${new Date(e.t).toLocaleTimeString()} — ${e.title}`);
+    if (recent.length) rows.push("- **Recent problems:**\n  " + recent.join("\n  "));
+    return rows.join("\n");
+  }
+
+  const APP_KB = [
+    { check: "gmail",
+      match: /gmail|e-?mail|imap|inbox|app ?password|link (my )?gmail|miles.*(not|won'?t|can'?t)/,
+      title: "Gmail won't connect",
+      why: "The desktop app reaches Gmail with a Google App Password over IMAP. It fails if 2-Step Verification is off, if you used your normal password instead of the 16-character app password, or if IMAP is disabled in Gmail.",
+      steps: [
+        "Your Google account → Security: 2-Step Verification must be ON.",
+        "myaccount.google.com/apppasswords → create one named 'Alfred' → copy the 16-character code.",
+        "Gmail on the web → Settings → Forwarding and POP/IMAP → Enable IMAP (if there's no toggle, it's already on).",
+        "Alfred → Settings → Gmail → your address + that app password → Link Gmail.",
+      ],
+      live: d => d["Gmail"] === "not connected" ? "Right now Gmail shows not connected." : "Right now Gmail shows: " + d["Gmail"] + "." },
+    { check: "eleven",
+      match: /voice|speak|talk(ing)?|sound|audio|eleven ?labs|11labs|tts|not talking|silent|no sound/,
+      title: "Voice isn't working",
+      why: "Either voice is switched off, the browser blocked sound until you click, there's no ElevenLabs key (so it uses the computer voice), or the ElevenLabs key/voice was rejected.",
+      steps: [
+        "Settings → Voice: the button should read '🔊 Voices on'.",
+        "Click anywhere in the app once (browsers block sound until you interact), then press 🔊 in the top bar.",
+        "For the ElevenLabs voices: Settings → ElevenLabs → the key must start with lowercase 'sk_'. Free plans can only use the built-in voices, not Library ones.",
+      ],
+      live: d => "Voice is " + d["Voice"] + "; ElevenLabs key is " + d["ElevenLabs key"] + "." },
+    { match: /save|saving|persist|losing|lost|reset|couldn'?t save|storage|forgets|doesn'?t remember/,
+      title: "Changes don't stick / 'couldn't save'",
+      why: "The browser is blocking site data — usually a private/incognito window or a 'block all cookies' setting. The installed desktop app doesn't have this problem.",
+      steps: [
+        "Open Alfred in a normal (non-private) window and allow site data for the page, then reload.",
+        "Or use the installed desktop app.",
+        "Settings → Backup & sync → export a backup first if you don't want to lose what's here.",
+      ],
+      live: d => "Saving is currently: " + d["Saving data"] + "." },
+    { check: "updates",
+      match: /updat|new version|out of date|old version|latest/,
+      title: "Updates",
+      why: "The installed desktop app checks the public release feed on launch and shows a strip on the Alfred home tab.",
+      steps: [
+        "Make sure you're on the installed app (from Alfred-Setup-*.exe), not the old portable folder.",
+        "Say 'check for updates' and I'll run it now.",
+        "If it errors it's usually no internet — say 'test my connection'.",
+      ],
+      live: d => "Updates: " + d["Updates"] + "." },
+    { check: "anthropic",
+      match: /anthropic|claude|smarter|own words|free.?form|ai (mode|key|brain)|api key/,
+      title: "Making Alfred smarter (AI mode)",
+      why: "Without an Anthropic API key I run an offline brain — fine for briefs, orders, ideas and this troubleshooting, but not open conversation.",
+      steps: [
+        "console.anthropic.com → API keys → create one, set a low monthly cap.",
+        "Alfred → Settings → Alfred's brain → paste the key (starts with 'sk-ant-').",
+        "Say 'test my anthropic key' and I'll confirm it.",
+      ],
+      live: d => "My brain is currently: " + d["Alfred's brain"] + "." },
+    { match: /won'?t (open|start|launch)|smartscreen|windows protected|application control|blocked this (file|app)/,
+      title: "The app won't start / Windows blocked it",
+      why: "The app isn't code-signed, so Windows SmartScreen blocks it the first time.",
+      steps: [
+        "On the blue 'Windows protected your PC' box: click More info → Run anyway.",
+        "That's one-time per machine.",
+      ] },
+    { match: /mic|microphone|dictation|speech.?to.?text/,
+      title: "The mic button is missing or won't listen",
+      why: "Speech-to-text only works in Chrome or Edge and needs microphone permission.",
+      steps: [
+        "Use Chrome or Edge (Firefox/Safari desktop don't support it).",
+        "Click the padlock in the address bar → allow Microphone → reload.",
+      ],
+      live: d => "Mic support here: " + d["Mic (talk to Alfred)"] + "." },
+  ];
+
+  const checkPhrase = c => ({ eleven: "my elevenlabs key", anthropic: "my anthropic key", gmail: "gmail", updates: "for updates", internet: "my connection", storage: "saving", voice: "the voice" }[c] || c);
+
+  async function runCheck(name) {
+    try {
+      if (name === "internet") {
+        if (!navigator.onLine) return "**Connection:** offline — Windows reports no network.";
+        const r = await fetch("https://api.github.com/zen", { cache: "no-store" });
+        return r.ok ? "**Connection:** online, reaching the internet fine." : "**Connection:** online but a test request returned " + r.status + ".";
+      }
+      if (name === "storage") {
+        try { localStorage.setItem("alfred:__t", "1"); localStorage.removeItem("alfred:__t"); return "**Saving:** working — your changes persist here."; }
+        catch { return "**Saving:** BLOCKED. This browser won't keep data (private window or blocked site data). Use a normal window or the desktop app."; }
+      }
+      if (name === "voice") {
+        if (!settings.voice) return "**Voice:** it's switched OFF. Turn it on in Settings → Voice.";
+        speak("This is a voice test from Alfred.", "alfred");
+        return "**Voice:** playing a test line now" + (settings.eleven ? " through ElevenLabs" : " with the computer voice") + ". Did you hear it?";
+      }
+      if (name === "eleven") {
+        if (!settings.eleven) return "**ElevenLabs:** no key set (Settings → ElevenLabs). I'm on the computer voice.";
+        const r = await fetch("https://api.elevenlabs.io/v1/user", { headers: { "xi-api-key": settings.eleven } });
+        if (r.status === 401) return "**ElevenLabs:** the key was rejected (401). It must start with lowercase `sk_` and be current.";
+        if (!r.ok) return "**ElevenLabs:** their API returned " + r.status + ".";
+        const j = await r.json().catch(() => ({}));
+        const s = j.subscription;
+        return "**ElevenLabs:** key works. " + (s ? `${s.tier} plan, ${s.character_count}/${s.character_limit} characters used.` : "");
+      }
+      if (name === "anthropic") {
+        if (!settings.anthropic) return "**Anthropic:** no key set — I'm on the offline brain. Add one in Settings → Alfred's brain for full conversation.";
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-api-key": settings.anthropic, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+          body: JSON.stringify({ model: settings.model || "claude-sonnet-5", max_tokens: 8, messages: [{ role: "user", content: "hi" }] }),
+        });
+        if (r.ok) return "**Anthropic:** key works. Model " + (settings.model || "claude-sonnet-5") + " — full AI mode is on.";
+        let m = ""; try { m = (await r.json()).error?.message || ""; } catch {}
+        if (r.status === 401) return "**Anthropic:** key rejected (401). Create a fresh one at console.anthropic.com.";
+        if (r.status === 400) return "**Anthropic:** 400 — usually the model name. Settings → Alfred's brain → Model → try 'claude-sonnet-5'. " + m;
+        if (r.status === 429) return "**Anthropic:** rate-limited or out of credit (429). Check console.anthropic.com → Billing.";
+        return "**Anthropic:** error " + r.status + ". " + m;
+      }
+      if (name === "gmail") {
+        if (!NATIVE && !SERVED) return "**Gmail:** not available — you've opened the file directly. Use the desktop app.";
+        const st = await GM.status();
+        if (st.connected) return "**Gmail:** connected — " + (st.method || "") + " as " + st.email + ".";
+        return "**Gmail:** not connected. Settings → Gmail to link it" + (NATIVE ? " with an App Password." : " (browser sign-in).");
+      }
+      if (name === "updates") {
+        if (!NATIVE || !NATIVE.updates) return "**Updates:** only the installed desktop app auto-updates.";
+        await NATIVE.updates.check();
+        await new Promise(r => setTimeout(r, 1800));
+        return "**Updates:** " + updWord(lastUpdate) + ".";
+      }
+    } catch (e) {
+      return "**" + name + " check:** couldn't finish — " + (e.message || e) + ". Often that's no internet; try 'test my connection'.";
+    }
+    return null;
+  }
+  async function fullHealthCheck() {
+    const names = ["internet", "storage", "anthropic", "eleven", "gmail"];
+    if (NATIVE && NATIVE.updates) names.push("updates");
+    const out = [];
+    for (const n of names) { try { const r = await runCheck(n); if (r) out.push(r); } catch {} }
+    return "**Full health check**\n\n" + out.join("\n\n") + "\n\n**Current state**\n" + diagText();
+  }
+
+  async function handleCheckCommand(text) {
+    const t = text.toLowerCase();
+    if (!/\b(test|check|run|verify|try|ping)\b/.test(t)) return null;
+    if (/eleven ?labs|11labs|voice ?id|tts/.test(t))                 return runCheck("eleven");
+    if (/anthropic|claude|ai key/.test(t))                           return runCheck("anthropic");
+    if (/gmail|imap|inbox|e-?mail (connection|link|access)/.test(t)) return runCheck("gmail");
+    if (/updat|new version/.test(t))                                 return runCheck("updates");
+    if (/internet|online|connection|network|reach|offline/.test(t))  return runCheck("internet");
+    if (/sav(e|ing)|storage|persist|local ?storage/.test(t))         return runCheck("storage");
+    if (/\bvoice\b|speak|sound|audio/.test(t))                       return runCheck("voice");
+    return null;
+  }
+
+  // Called by sendChat before the brain split. Returns a string to reply with, or null.
+  async function maybeAppHelp(text) {
+    const chk = await handleCheckCommand(text);
+    if (chk) return chk;                                     // "test / check X" — works with or without a key
+    const t = text.toLowerCase();
+    if (/\b(health check|full check|diagnos\w*|status report|check everything|run all checks|self.?test|full checkup)\b/.test(t)
+        || /\bwhat('?s| is) wrong\b/.test(t) || /\bsomething('?s| is) (wrong|broken|off|up)\b/.test(t))
+      return fullHealthCheck();
+    if (settings.anthropic) return null;                     // let Claude field nuanced questions (it has the diagnostics + KB)
+    const trouble = /\b(not working|won'?t|can'?t|cannot|couldn'?t|isn'?t|aren'?t|doesn'?t|didn'?t|wasn'?t|broke|broken|error|failed|failing|stuck|fix|troubleshoot|greyed|grayed|frozen|stopped|dead|glitch|silent|no sound|smartscreen|windows protected|keeps?|not sav\w*|nothing happens)\b/.test(t);
+    const howto = /\bhow (do|can|to|does)\b|\bhow('?s| is)\b.*\bwork|\bset ?up\b|\bre-?connect\b|\benable\b|\bturn on\b|\bwhere (do|is|are)\b/.test(t);
+    const aboutApp = /(gmail|e-?mail|imap|inbox|voice|speak|eleven ?labs|tts|sound|audio|\bmic\b|microphone|dictation|sav\w*|storage|persist\w*|updat\w*|version|smartscreen|install\w*|anthropic|api key|claude|the app|applicat\w*|alfred|the program|revenuecat)/.test(t);
+    if ((trouble || howto) && aboutApp) {
+      const hit = APP_KB.find(k => k.match.test(t));
+      const d = diagnostics();
+      if (hit) {
+        let s = "**" + hit.title + "**\n\n" + hit.why + "\n\n";
+        if (hit.live) s += "_" + hit.live(d) + "_\n\n";
+        s += hit.steps.map((x, i) => (i + 1) + ". " + x).join("\n");
+        if (hit.check) s += `\n\n(Say "test ${checkPhrase(hit.check)}" and I'll run a live check.)`;
+        return s;
+      }
+      return "Not sure which part yet — here's everything I can see:\n\n" + diagText(d) + "\n\nTell me what's misbehaving — Gmail? voice? saving? updates? — and I'll get specific. Or say **health check**.";
+    }
+    return null;
+  }
+
   function alfredSystem() {
     const name = settings.name || "the boss";
     const biz = settings.biz || "a small business doing wholesaling and customer service";
@@ -1784,8 +2005,15 @@
       `When a request belongs to a teammate, answer it yourself using the live data below and attribute briefly ("Otto's read:", "Miles flagged...").`,
       `Business context: ${biz}.`,
       `Be concise — this is a dashboard. Short paragraphs or tight bullets. Never invent an order, email, date or number that isn't in the data. If something's missing, say what you'd need.`,
-      `If the user hits an error or something's broken, give them numbered steps to fix it.`,
+      ``,
+      `YOU ALSO BUILT AND MAINTAIN THIS APPLICATION and know it end to end — Gmail setup (a Google App Password over IMAP, or Google sign-in), the ElevenLabs voices, the auto-updater, and browser storage. When ${name} asks about the app or reports a problem: diagnose from APP STATUS below plus the troubleshooting notes, say plainly what's wrong, give numbered fix steps, and remind them they can ask you to run a live check — e.g. "test my elevenlabs key", "check for updates", "test gmail", "test my connection".`,
       `Today is ${new Date().toDateString()}, local time ${new Date().toLocaleTimeString()}.`,
+      ``,
+      `APP STATUS:`,
+      diagText(),
+      ``,
+      `APP TROUBLESHOOTING NOTES:`,
+      APP_KB.map(k => `• ${k.title} — ${k.why} Fix: ${k.steps.join(" ")}`).join("\n"),
       ``,
       `LIVE DATA (JSON):`,
       `orders = ${JSON.stringify(orders.map(o => ({ item:o.item, vendor:o.vendor, ref:o.ref, status:o.status, shipped:o.shipped, eta:o.eta, notes:o.notes })))}`,
@@ -1808,10 +2036,10 @@
     if (/inbox|email|mail|message/.test(t)) { go("inbox"); return "Miles flagged this:\n\n" + localBrief(); }
     if (/idea|suggest|grow|improve|strategy|simplif/.test(t)) { go("ideas"); return "Ivy's shortlist:\n\n- " + localIdeas(settings.biz).join("\n- "); }
     if (/help|what can you|who are you|features/.test(t))
-      return `I'm Alfred${name}. I keep the day together and hand work to the team:\n\n- **Miles** — email: "summarize my inbox"\n- **Otto** — orders: "where are my orders"\n- **Ivy** — ideas: "give me 3 ideas" / "simplify my products"\n\nAdd an Anthropic key in **Settings** and I'll answer anything in my own words. Add an ElevenLabs key and I'll speak properly.`;
+      return `I'm Alfred${name}. I keep the day together and hand work to the team:\n\n- **Miles** — email: "summarize my inbox"\n- **Otto** — orders: "where are my orders"\n- **Ivy** — ideas: "give me 3 ideas" / "simplify my products"\n\nI also run this application itself — ask me if something's broken ("Gmail won't connect", "voice isn't working") or say **"health check"** and I'll scan everything. I can run live checks too: "test my elevenlabs key", "check for updates".\n\nAdd an Anthropic key in **Settings** and I'll answer anything in my own words.`;
     if (/thank|cheers|nice one/.test(t)) return "Always. What's next?";
     // fallback
-    return `I've noted that${name}. My offline brain is best at four things: **morning brief**, **order status**, **inbox summary**, and **ideas**. For free-form questions, pop an Anthropic API key into Settings and I'll take it from there — here's how:\n\n1. Go to console.anthropic.com → **API keys**.\n2. Create a key, set a low monthly cap.\n3. Paste it in **Settings → Alfred's brain**.\n4. Come back and ask me again.`;
+    return `I've noted that${name}. My offline brain handles: **morning brief**, **order status**, **inbox summary**, **ideas**, and **fixing the app** ("something's wrong", "health check", "test gmail"). For open-ended questions, add an Anthropic API key in **Settings → Alfred's brain** (console.anthropic.com → API keys) and I'll take it from there.`;
   }
   function localMorningBrief() {
     const unread = emails.filter(e => !e.read).length;
@@ -2087,6 +2315,11 @@
     document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   });
+  $("#copyDiag").addEventListener("click", async () => {
+    const txt = "Alfred diagnostics — " + new Date().toLocaleString() + "\n\n" + diagText().replace(/\*\*/g, "");
+    try { await navigator.clipboard.writeText(txt); fixCard("Diagnostics copied", ["Plain text, no keys or passwords in it — paste it wherever you need help."], "info", { autohide: true }); }
+    catch { fixCard("Couldn't copy automatically", ["Here it is — select and copy:", txt], "info", { autohide: false }); }
+  });
   $("#importData").addEventListener("click", () => $("#importFile").click());
   $("#importFile").addEventListener("change", async e => {
     const file = e.target.files[0];
@@ -2141,7 +2374,9 @@
     }
 
     NATIVE.updates.onStatus(s => {
+      lastUpdate = s;                       // so Alfred's diagnostics can see update state
       ver = s.current || ver;
+      if (s.current) appVersion = s.current;
       const V = ver ? "v" + ver : "";
       switch (s.state) {
         case "dev":
