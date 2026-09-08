@@ -8,9 +8,11 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win"
+    "dist": "electron-builder --win",
+    "release": "electron-builder --win --publish always"
   },
   "dependencies": {
+    "electron-updater": "^6.3.9",
     "imapflow": "^1.0.171",
     "mailparser": "^3.7.1",
     "nodemailer": "^6.9.15"
@@ -38,13 +40,19 @@
       "!.env",
       "!.env.*"
     ],
+    "publish": {
+      "provider": "github",
+      "owner": "goodguyllc773-oss",
+      "repo": "Alfred"
+    },
     "win": {
-      "target": "dir",
+      "target": "nsis",
       "icon": "assets/alfred.ico",
       "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "artifactName": "Alfred-Setup-${version}.${ext}"
     }

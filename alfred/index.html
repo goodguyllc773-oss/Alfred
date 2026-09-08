@@ -225,6 +225,20 @@
   }
 
   /* ---- Tabs (sections) ---------------------------------------------------- */
+  /* ---- Update bar (Alfred home) ------------------------------------- */
+  .updatebar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px; margin-bottom: 16px;
+    border: 1px solid var(--line-strong); border-radius: 10px;
+    background: var(--panel); font-size: 13px;
+  }
+  .updatebar .uspacer { flex: 1; }
+  .updatebar .udot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex: none; }
+  .updatebar.ok    .udot { background: var(--ok); box-shadow: 0 0 8px rgba(79,208,138,.5); }
+  .updatebar.new   .udot { background: var(--warn); box-shadow: 0 0 8px rgba(255,209,102,.5); }
+  .updatebar.busy  .udot { background: var(--accent); box-shadow: 0 0 8px var(--glow); animation: pulse 1.2s ease-in-out infinite; }
+  .updatebar.err   .udot { background: var(--danger); }
+
   .tab[hidden] { display: none; }
   .tab { animation: rise .28s ease both; }
   @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
@@ -415,6 +429,13 @@
 
     <!-- ============ ALFRED ============ -->
     <section class="tab" data-tab="alfred">
+      <div class="updatebar" id="updatebar" hidden>
+        <span class="udot" id="udot"></span>
+        <span id="utext">Checking for updates…</span>
+        <span class="uspacer"></span>
+        <button class="btn sm" id="ubtn" hidden></button>
+        <button class="btn ghost sm" id="ucheck" title="Check now">Check</button>
+      </div>
       <div class="grid cols-2">
         <div class="panel">
           <div class="hud-wrap">
@@ -2098,6 +2119,62 @@
   }
 
   /* ===================================================================
+     Updates — status strip on the Alfred home tab (desktop app only)
+  =================================================================== */
+  function initUpdates() {
+    const bar = $("#updatebar"), dot = $("#udot"), txt = $("#utext"),
+          btn = $("#ubtn"), check = $("#ucheck");
+    if (!NATIVE || !NATIVE.updates) { bar.hidden = true; return; }
+
+    let ver = "";
+    NATIVE.updates.version().then(v => { ver = v || ""; });
+
+    function set(cls, message, button) {
+      bar.hidden = false;
+      bar.className = "updatebar" + (cls ? " " + cls : "");
+      txt.textContent = message;
+      if (button) { btn.hidden = false; btn.textContent = button.label; btn.disabled = !!button.disabled; btn.onclick = button.onclick; }
+      else { btn.hidden = true; btn.onclick = null; }
+    }
+
+    NATIVE.updates.onStatus(s => {
+      ver = s.current || ver;
+      const V = ver ? "v" + ver : "";
+      switch (s.state) {
+        case "dev":
+        case "unsupported":
+          bar.hidden = true; break;
+        case "checking":
+          set("busy", "Checking for updates… " + V, null); check.disabled = true; break;
+        case "current":
+          set("ok", "Alfred " + V + " — up to date.", null); check.disabled = false; break;
+        case "available":
+          set("new", "Update available: v" + s.version + " (you have " + V + ").",
+              { label: "Download update", onclick: () => { set("busy", "Starting download…", { label: "Downloading…", disabled: true }); NATIVE.updates.download(); } });
+          check.disabled = false; break;
+        case "downloading":
+          set("busy", "Downloading update… " + (s.percent ?? 0) + "%", { label: "Downloading…", disabled: true }); break;
+        case "ready":
+          set("new", "Update v" + s.version + " ready to install.",
+              { label: "Restart & update", onclick: () => { btn.disabled = true; btn.textContent = "Restarting…"; NATIVE.updates.install(); } });
+          check.disabled = false; break;
+        case "error":
+          set("err", "Couldn't check for updates.",
+              { label: "Open releases", onclick: () => NATIVE.updates.openReleases() });
+          check.disabled = false;
+          fixCard("Update check failed", [
+            (s.error || "Unknown error").slice(0, 200),
+            "You're still on " + (V || "your installed version") + " — nothing broke.",
+            "Try “Check” again in a bit, or grab the latest from the Releases page.",
+          ], "warn", { once: "update-err" });
+          break;
+      }
+    });
+
+    check.onclick = () => { check.disabled = true; NATIVE.updates.check(); };
+  }
+
+  /* ===================================================================
      Boot
   =================================================================== */
   loadSettingsForm();
@@ -2106,6 +2183,7 @@
   refreshAll();
   go(store.get("tab", "alfred"));
   if (NATIVE || SERVED) gmailBoot();
+  initUpdates();
 
   // greet — once we know voices are likely ready
   function bootGreeting() {

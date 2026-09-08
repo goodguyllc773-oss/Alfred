@@ -19,4 +19,12 @@ contextBridge.exposeInMainWorld("alfredNative", {
     modify:     (a) => ipcRenderer.invoke("gmail:modify", a),
     trash:      (a) => ipcRenderer.invoke("gmail:trash", a),
   },
+  updates: {
+    onStatus:     (cb) => ipcRenderer.on("update:status", (_e, s) => cb(s)),
+    check:        () => ipcRenderer.invoke("update:check"),
+    download:     () => ipcRenderer.invoke("update:download"),
+    install:      () => ipcRenderer.invoke("update:install"),
+    version:      () => ipcRenderer.invoke("update:version"),
+    openReleases: () => ipcRenderer.invoke("update:openReleases"),
+  },
 });

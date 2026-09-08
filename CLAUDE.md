@@ -148,11 +148,24 @@ renderer only ever calls `NATIVE.gmail.list/get/send/draft/modify/trash`.
   write. `Settings → Backup & sync` exports/imports all `alfred:*` data as one JSON
   (`#exportData` / `#importData`) — the way to line up the separate stores the
   browser copy and the desktop app each keep.
-- **Packaging**: `npm run pack` (`electron-builder --dir`) with
-  `win.signAndEditExecutable:false` avoids the winCodeSign symlink-privilege failure
-  on stock Windows; output `dist/win-unpacked/` is the portable app. `npm run dist`
-  (NSIS installer) needs Developer Mode / elevation. `assets/alfred.ico` is a
+- **Packaging**: `win.target` is `nsis`, `signAndEditExecutable:false` — that flag is
+  what makes the NSIS build succeed on stock Windows (skips the winCodeSign download
+  whose symlink extraction needs Developer Mode / admin). `npm run dist` →
+  `dist/Alfred-Setup-<v>.exe` + `latest.yml` + `.blockmap`. `npm run pack`
+  (`--dir`) still gives the portable `dist/win-unpacked/`. `assets/alfred.ico` is a
   PS-generated 256px icon from `alfred.png`.
+- **Auto-update**: `electron-updater` + GitHub Releases (`build.publish` →
+  `goodguyllc773-oss/Alfred`). `setupUpdates()` in `main.js` checks once ~2.5s after
+  launch (only when `app.isPackaged`), `autoDownload:false`. It streams state to the
+  renderer over `update:status` (`checking|current|available|downloading|ready|
+  error|dev|unsupported`); IPC `update:check|download|install|version|openReleases`.
+  Renderer: `initUpdates()` drives `#updatebar` on the Alfred home tab (hidden unless
+  `NATIVE`) — "up to date" / "Download update" / "Restart & update". `quitAndInstall`
+  needs the NSIS-installed build (the `--dir` portable can check but not self-apply).
+  **Release flow**: bump `version` in `alfred/package.json` → `npm run dist` →
+  `gh release create v<version> alfred/dist/Alfred-Setup-<v>.exe
+  alfred/dist/Alfred-Setup-<v>.exe.blockmap alfred/dist/latest.yml -t v<version>`.
+  Every installed copy picks it up on next launch.
 
 ## Conventions
 

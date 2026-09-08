@@ -14,14 +14,34 @@ A personal "chief of staff" desk. The UI is `index.html` — it runs three ways:
 cd alfred
 npm install
 npm start          # dev run
-npm run pack       # portable build -> dist/win-unpacked/Alfred.exe  (no installer, always works)
-npm run dist       # NSIS installer -> dist/Alfred-Setup-<version>.exe
+npm run dist       # NSIS installer -> dist/Alfred-Setup-<version>.exe (+ latest.yml)
+npm run pack       # portable build  -> dist/win-unpacked/Alfred.exe
 ```
 
-`npm run dist` needs Windows **Developer Mode** on (Settings → Privacy & security → For
-developers) or an elevated shell — electron-builder's signing tools unpack symlinks.
-Without that, use `npm run pack`: the `dist/win-unpacked/` folder is the whole app —
-move it anywhere and pin `Alfred.exe` to the taskbar.
+`win.signAndEditExecutable: false` in `package.json` is what lets `npm run dist`
+succeed on a stock Windows account (skips the code-sign tooling that needs Developer
+Mode / admin). The installed app has the default Electron `.exe` file icon; the window
+and taskbar icon are set at runtime from `assets/alfred.png`.
+
+## Updates
+
+The installed app checks GitHub Releases on launch and shows a strip on the **Alfred
+home tab**: *up to date*, or *Download update* → *Restart & update*. Nothing installs
+without a click. (The portable `--dir` build can check but can't self-apply — install
+via `Alfred-Setup-*.exe` for working updates.)
+
+**Cutting a release** (so every install — yours, mom's, your friend's — updates):
+
+```bash
+# bump "version" in alfred/package.json, commit
+cd alfred && npm run dist
+gh release create vX.Y.Z \
+  dist/Alfred-Setup-X.Y.Z.exe dist/Alfred-Setup-X.Y.Z.exe.blockmap dist/latest.yml \
+  -t vX.Y.Z -n "what changed"
+```
+
+`build.publish` in `package.json` points at `goodguyllc773-oss/Alfred`; `npm run
+release` does the build + upload in one step if `GH_TOKEN` is set.
 
 ## Connect Gmail
 

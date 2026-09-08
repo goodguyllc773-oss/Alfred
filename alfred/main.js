@@ -74,9 +74,41 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => { createWindow(); setupUpdates(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
 app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+/* ===================== auto-update (electron-updater + GitHub Releases) =====
+   The renderer shows a card on the Alfred home tab. On launch we check once and
+   push status to it; the user clicks to download, and again to restart into the
+   new version. Nothing installs without a click.                              */
+let autoUpdater = null;
+function pushUpdate(payload) {
+  if (win && !win.isDestroyed()) win.webContents.send("update:status", { current: app.getVersion(), ...payload });
+}
+function setupUpdates() {
+  try { autoUpdater = require("electron-updater").autoUpdater; }
+  catch { pushUpdate({ state: "unsupported", reason: "updater not installed" }); return; }
+
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.on("checking-for-update", () => pushUpdate({ state: "checking" }));
+  autoUpdater.on("update-available",     i => pushUpdate({ state: "available", version: i.version, notes: typeof i.releaseNotes === "string" ? i.releaseNotes : "" }));
+  autoUpdater.on("update-not-available", () => pushUpdate({ state: "current" }));
+  autoUpdater.on("download-progress",    p => pushUpdate({ state: "downloading", percent: Math.round(p.percent || 0) }));
+  autoUpdater.on("update-downloaded",    i => pushUpdate({ state: "ready", version: i.version }));
+  autoUpdater.on("error",                e => pushUpdate({ state: "error", error: String((e && e.message) || e).slice(0, 300) }));
+
+  if (!app.isPackaged) { pushUpdate({ state: "dev" }); return; }
+  // give the window a moment to attach its listener, then check
+  setTimeout(() => { autoUpdater.checkForUpdates().catch(e => pushUpdate({ state: "error", error: String(e.message || e).slice(0, 300) })); }, 2500);
+}
+
+ipcMain.handle("update:check",   async () => { try { if (!autoUpdater) throw new Error("updater unavailable"); await autoUpdater.checkForUpdates(); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle("update:download", async () => { try { await autoUpdater.downloadUpdate(); return { ok: true }; } catch (e) { pushUpdate({ state: "error", error: e.message }); return { ok: false, error: e.message }; } });
+ipcMain.handle("update:install", () => { try { setImmediate(() => autoUpdater.quitAndInstall(false, true)); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; } });
+ipcMain.handle("update:version", () => app.getVersion());
+ipcMain.handle("update:openReleases", () => { shell.openExternal("https://github.com/goodguyllc773-oss/Alfred/releases/latest"); });
 
 /* ===================== credentials + token storage ===================== */
 function readCreds() {
