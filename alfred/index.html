@@ -983,6 +983,12 @@
   =================================================================== */
   const shownFixKeys = new Set();
   const errLog = []; // rolling record so Alfred can say "the error you got 3 min ago"
+  window.addEventListener("error", e => {
+    try { fixCard("Unexpected error", [String((e.error && e.error.message) || e.message || e), (e.filename ? e.filename.split("/").pop() + ":" + e.lineno : "")], "err", { once: "err-" + (e.lineno || 0), autohide: false }); } catch {}
+  });
+  window.addEventListener("unhandledrejection", e => {
+    try { fixCard("Unexpected error (async)", [String((e.reason && e.reason.message) || e.reason || "")], "err", { once: "rej", autohide: false }); } catch {}
+  });
   function fixCard(title, steps, kind = "warn", opts = {}) {
     errLog.push({ t: Date.now(), title, kind });
     if (errLog.length > 25) errLog.shift();
@@ -2983,8 +2989,8 @@
     $("#wizDone").addEventListener("click", () => {
       const v = $("#wizBiz").value.trim();
       if (!v) { $("#wizErr3").textContent = "One sentence is enough — this helps Alfred a lot."; return; }
-      settings.biz = v; persist();
-      store.set("setupDone", true);
+      $("#wizErr3").textContent = "";
+      try { settings.biz = v; persist(); store.set("setupDone", true); } catch (e) { console.error("wizDone/save", e); }
       clearGates();
       startApp();
     });
@@ -3098,25 +3104,33 @@
   /* ===================================================================
      Boot
   =================================================================== */
+  let appStarted = false;
   function startApp() {
-  loadSettingsForm();
-  updateModeChip();
-  renderAdmin();
-  // open on a clean chat with one short hello from Alfred (not persisted)
-  chat.length = 0;
-  chat.push({ role: "assistant", content: `${greetingText()} ${greetingSub()}\n\nWhat can I do for you?` });
-  renderChat();
-  refreshAll();
-  go(store.get("tab", "alfred") === "admin" ? "alfred" : store.get("tab", "alfred"));
-  if (NATIVE || SERVED) gmailBoot();
-  initUpdates();
-  initBrain();
-  if (NATIVE && NATIVE.license) wireAdmin();
-  bootGreeting();
-  if (firstRun && !NATIVE) fixCard("Welcome — Alfred is set up with sample data", [
-    "The orders and emails are examples — edit or clear them.",
-    "Tell Alfred your name and what you do in Settings so he's useful.",
-  ], "info", { once: "firstrun", autohide: false });
+    if (appStarted) return;                       // guard against a double call
+    appStarted = true;
+    const step = (label, fn) => { try { fn(); } catch (e) {
+      console.error("startApp/" + label, e);
+      fixCard("Startup hiccup (" + label + ")", [String(e && e.message || e), "The rest of Alfred still loaded."], "warn", { once: "boot-" + label });
+    } };
+    step("settings", loadSettingsForm);
+    step("modeChip", updateModeChip);
+    step("admin",    renderAdmin);
+    step("chat", () => {
+      chat.length = 0;
+      chat.push({ role: "assistant", content: `${greetingText()} ${greetingSub()}\n\nWhat can I do for you?` });
+      renderChat();
+    });
+    step("refresh",  refreshAll);
+    step("route", () => { const t = store.get("tab", "alfred"); go(t === "admin" ? "alfred" : t); });
+    step("gmail",    () => { if (NATIVE || SERVED) gmailBoot(); });
+    step("updates",  initUpdates);
+    step("brain",    initBrain);
+    step("adminWire",() => { if (NATIVE && NATIVE.license) wireAdmin(); });
+    step("greeting", bootGreeting);
+    if (firstRun && !NATIVE) fixCard("Welcome — Alfred is set up with sample data", [
+      "The orders and emails are examples — edit or clear them.",
+      "Tell Alfred your name and what you do in Settings so he's useful.",
+    ], "info", { once: "firstrun", autohide: false });
   }
 
   // gate first; startApp() runs once the license + setup wizard pass
