@@ -9,6 +9,9 @@ per top-level directory, a single `index.html` with inline `<style>`/`<script>`,
 build, opened straight in a browser.
 
 - `timebox-timer/` — a Pomodoro-style focus timer. Still a pure static file.
+- `alfred-license/` — a Cloudflare Worker (`worker.js` + `wrangler.toml`): the
+  access-code service the Alfred desktop app checks on activation/launch and the
+  Administration tab drives. Deployed separately by the owner; see its README.
 - `alfred/` — a personal "chief of staff" desk (chat with Alfred + employee tabs for
   email/Miles, orders/Otto, ideas/Ivy, revenue). The UI is still one static
   `index.html` and still works opened directly, **but it now also has an Electron
@@ -131,6 +134,35 @@ is the only accent; `--warn` / `--danger` / `--ok` for status.
   snapshot + condensed KB so Claude troubleshoots conversationally. UI: a "Health
   check" quick chip and Settings → Backup → "Copy diagnostics" (plain text, no
   secrets).
+
+#### alfred — licensing, setup wizard, Administration
+
+- **Gate**: `initLicense()` runs before `startApp()`. Desktop: `NATIVE.license.status()`
+  → if not `activated`/`isAdmin`, the full-screen `#lockScreen` shows (`.app` gets
+  `inert` + blur) and nothing else runs. `license:status` also does a launch `/check`
+  that only flips to locked on an explicit `revoked`/`expired`/`device_mismatch` — an
+  unreachable server leaves it unlocked. Browser build has no `NATIVE.license` and
+  runs open. `#lockScreen` → "I'm the app owner" → `license:setAdmin` (verifies the
+  admin key against the Worker, stores it + a salted-sha256 of the master password in
+  `userData/license.bin`).
+- **Setup wizard** (`#setupWizard`, first run only, keyed by `store.get("setupDone")`):
+  name (required) → business/work (required) → `startApp()`. Everything else stays
+  "later, from Settings".
+- **Administration tab** (`data-tab="admin"`, nav hidden unless `isAdmin`):
+  master-password unlock → generate code (name + optional expiry; every code is also
+  appended to `Documents/Alfred/access-codes.csv` by main), a codes table
+  (status / device / last-seen) with revoke / un-revoke / release-device, and owner
+  tools (open data folder, re-run wizard, change server URL). All server calls go
+  through `license:adminCall` in main, which injects the stored admin key — the
+  renderer never holds it.
+- **Persistence**: `main.js` mirrors `{settings, orders, ideas, setupDone}` to an
+  encrypted `userData/config.bin` on every debounced `persist()`. On boot,
+  `restoreFromConfigFile()` — if `localStorage` had **no** saved settings at all
+  (`rawSavedSettings === null`, i.e. wiped) it restores wholesale; otherwise it only
+  fills blank precious keys (name/biz/anthropic/eleven/…). Gmail creds and the license
+  already live in `userData`. Net effect: an update or a storage wipe never loses
+  identity or API keys. `LICENSE_SERVER` const in `main.js` is baked in at release
+  time; empty ⇒ the owner enters the URL in the lock screen / Administration.
 
 #### alfred — local brain (Ollama)
 

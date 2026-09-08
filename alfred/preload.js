@@ -33,4 +33,21 @@ contextBridge.exposeInMainWorld("alfredNative", {
     chat:       (a) => ipcRenderer.invoke("brain:chat", a),
     onProgress: (cb) => ipcRenderer.on("brain:progress", (_e, p) => cb(p)),
   },
+  license: {
+    status:       () => ipcRenderer.invoke("license:status"),
+    activate:     (a) => ipcRenderer.invoke("license:activate", a),
+    setAdmin:     (a) => ipcRenderer.invoke("license:setAdmin", a),
+    checkMaster:  (a) => ipcRenderer.invoke("license:checkMaster", a),
+    adminCall:    (a) => ipcRenderer.invoke("license:adminCall", a),
+    setServer:    (a) => ipcRenderer.invoke("license:setServer", a),
+    deactivate:   () => ipcRenderer.invoke("license:deactivate"),
+    openCodesFile:() => ipcRenderer.invoke("license:openCodesFile"),
+  },
+  app: {
+    openDataFolder: () => ipcRenderer.invoke("app:openDataFolder"),
+  },
+  config: {
+    load: () => ipcRenderer.invoke("config:load"),
+    save: (d) => ipcRenderer.invoke("config:save", d),
+  },
 });

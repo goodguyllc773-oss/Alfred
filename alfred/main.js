@@ -224,6 +224,158 @@ ipcMain.handle("brain:status", () => brainStatus());
 ipcMain.handle("brain:setup",  () => brainSetup());
 ipcMain.handle("brain:chat",   (_e, a) => brainChat(a || {}));
 
+/* ===================== license / access codes ============================
+   The app is locked until a code is activated against the license Worker.
+   Admin (the owner) enters an admin key instead and gets full access.
+   Everything is stored encrypted in userData so it survives updates.
+   `check` on every launch only LOCKS on an explicit revoked/expired.
+========================================================================== */
+const LICENSE_SERVER = "";   // baked in at release time; empty = ask the owner to enter it
+
+const LICENSE_FILE = () => dataFile("license.bin");
+const DEVICE_FILE = () => dataFile("device.json");
+const CONFIG_FILE = () => dataFile("config.bin");
+
+function encWrite(file, obj) {
+  const s = JSON.stringify(obj);
+  fs.writeFileSync(file, safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(s) : Buffer.from("PLAIN:" + s, "utf8"));
+}
+function encRead(file) {
+  try {
+    const buf = fs.readFileSync(file);
+    const s = buf.subarray(0, 6).toString("utf8") === "PLAIN:" ? buf.toString("utf8").slice(6) : safeStorage.decryptString(buf);
+    return JSON.parse(s);
+  } catch { return null; }
+}
+
+function deviceInfo() {
+  let d = null;
+  try { d = JSON.parse(fs.readFileSync(DEVICE_FILE(), "utf8")); } catch {}
+  if (!d || !d.id) {
+    d = { id: crypto.randomUUID(), name: require("os").hostname() };
+    try { fs.writeFileSync(DEVICE_FILE(), JSON.stringify(d)); } catch {}
+  }
+  return d;
+}
+const readLicense = () => encRead(LICENSE_FILE()) || {};
+const writeLicense = obj => encWrite(LICENSE_FILE(), obj);
+function serverUrl() { return (readLicense().serverUrl || LICENSE_SERVER || "").replace(/\/+$/, ""); }
+
+async function post(pathname, body) {
+  const base = serverUrl();
+  if (!base) return { ok: false, reason: "no_server" };
+  try {
+    const r = await fetch(base + pathname, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify(body), signal: AbortSignal.timeout(10000),
+    });
+    const j = await r.json().catch(() => ({}));
+    return j && typeof j === "object" ? j : { ok: false, reason: "bad_response" };
+  } catch (e) {
+    return { ok: false, reason: "unreachable", detail: String(e.message || e) };
+  }
+}
+
+function codesBackupFile() {
+  const dir = path.join(app.getPath("documents"), "Alfred");
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return path.join(dir, "access-codes.csv");
+}
+function appendCodeBackup(rec) {
+  const f = codesBackupFile();
+  const header = "code,name,created,expires\n";
+  const line = [rec.code, (rec.name || "").replace(/[",\n]/g, " "), rec.createdAt || new Date().toISOString(), rec.expiresAt || ""].join(",") + "\n";
+  try {
+    if (!fs.existsSync(f)) fs.writeFileSync(f, header);
+    fs.appendFileSync(f, line);
+  } catch {}
+  return f;
+}
+
+ipcMain.handle("license:status", async () => {
+  const lic = readLicense();
+  const dev = deviceInfo();
+  const base = serverUrl();
+  const out = {
+    activated: !!lic.activated, isAdmin: !!lic.isAdmin,
+    code: lic.code || null, name: lic.name || "", expiresAt: lic.expiresAt || null,
+    hasMaster: !!lic.masterHash, serverConfigured: !!base, deviceName: dev.name,
+  };
+  // launch re-check — only LOCK on an explicit revoked/expired
+  if (lic.activated && !lic.isAdmin && lic.code && base) {
+    const r = await post("/check", { code: lic.code, deviceId: dev.id });
+    if (r && r.ok === false && (r.reason === "revoked" || r.reason === "expired" || r.reason === "device_mismatch")) {
+      writeLicense({ ...lic, activated: false, lockedReason: r.reason });
+      out.activated = false; out.lockedReason = r.reason;
+    } else if (r && r.ok) {
+      out.name = r.name || out.name;
+    }
+  }
+  return out;
+});
+
+ipcMain.handle("license:activate", async (_e, { serverUrl: su, code }) => {
+  const lic = readLicense();
+  if (su) lic.serverUrl = String(su).replace(/\/+$/, "");
+  const dev = deviceInfo();
+  const r = await post("/activate", { code: String(code || "").trim().toUpperCase(), deviceId: dev.id, deviceName: dev.name });
+  if (r.ok) {
+    writeLicense({ ...lic, activated: true, isAdmin: false, code: String(code).trim().toUpperCase(), name: r.name || "", expiresAt: r.expiresAt || null, lockedReason: null });
+  } else if (r.reason === "no_server" || r.reason === "unreachable") {
+    // keep whatever serverUrl we were given so the owner can retry
+    writeLicense(lic);
+  }
+  return r;
+});
+
+ipcMain.handle("license:setAdmin", async (_e, { serverUrl: su, adminKey, masterPassword }) => {
+  const lic = readLicense();
+  lic.serverUrl = String(su || lic.serverUrl || "").replace(/\/+$/, "");
+  const r = await post("/admin/verify", { adminSecret: adminKey });
+  if (!r.ok) return r;
+  const bcrypt = null; // keep it dependency-free: salted sha-256
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.createHash("sha256").update(salt + ":" + String(masterPassword || "")).digest("hex");
+  writeLicense({ ...lic, activated: true, isAdmin: true, adminKey, masterSalt: salt, masterHash: hash });
+  return { ok: true };
+});
+
+ipcMain.handle("license:checkMaster", (_e, { password }) => {
+  const lic = readLicense();
+  if (!lic.masterHash) return { ok: false, reason: "not_set" };
+  const hash = crypto.createHash("sha256").update((lic.masterSalt || "") + ":" + String(password || "")).digest("hex");
+  return { ok: hash === lic.masterHash };
+});
+
+ipcMain.handle("license:adminCall", async (_e, { path: pathname, body }) => {
+  const lic = readLicense();
+  if (!lic.isAdmin || !lic.adminKey) return { ok: false, reason: "not_admin" };
+  const r = await post(pathname, { ...(body || {}), adminSecret: lic.adminKey });
+  if (r && r.ok && pathname === "/admin/generate" && r.code) {
+    r.backupFile = appendCodeBackup({ code: r.code, name: r.name, createdAt: new Date().toISOString(), expiresAt: r.expiresAt });
+  }
+  return r;
+});
+
+ipcMain.handle("license:setServer", (_e, { serverUrl: su }) => {
+  const lic = readLicense();
+  writeLicense({ ...lic, serverUrl: String(su || "").replace(/\/+$/, "") });
+  return { ok: true };
+});
+
+ipcMain.handle("license:deactivate", () => {
+  const lic = readLicense();
+  writeLicense({ serverUrl: lic.serverUrl });   // keep only the server URL
+  return { ok: true };
+});
+
+ipcMain.handle("license:openCodesFile", () => { shell.showItemInFolder(codesBackupFile()); });
+ipcMain.handle("app:openDataFolder", () => { shell.openPath(app.getPath("userData")); });
+
+/* ---- config mirror: keys/identity survive even a full storage wipe ---- */
+ipcMain.handle("config:load", () => encRead(CONFIG_FILE()));
+ipcMain.handle("config:save", (_e, data) => { try { encWrite(CONFIG_FILE(), data || {}); return { ok: true }; } catch (e) { return { ok: false, error: String(e.message || e) }; } });
+
 /* ===================== auto-update (electron-updater + GitHub Releases) =====
    The renderer shows a card on the Alfred home tab. On launch we check once and
    push status to it; the user clicks to download, and again to restart into the

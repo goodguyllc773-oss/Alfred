@@ -1,0 +1,12 @@
+name = "alfred-license"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# The KV namespace id is filled in by `wrangler kv namespace create CODES`
+# (see README.md). Paste the returned id below.
+[[kv_namespaces]]
+binding = "CODES"
+id = "PASTE_KV_NAMESPACE_ID_HERE"
+
+# ADMIN_SECRET is set with:  wrangler secret put ADMIN_SECRET
+# (do NOT put it in this file — it's committed)

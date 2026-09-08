@@ -225,6 +225,34 @@
   }
 
   /* ---- Tabs (sections) ---------------------------------------------------- */
+  /* ---- Full-screen gates: lock + setup wizard ---------------------- */
+  .gate {
+    position: fixed; inset: 0; z-index: 200;
+    background:
+      radial-gradient(900px 600px at 80% -10%, rgba(47,131,212,.16), transparent 60%),
+      var(--bg);
+    display: grid; place-items: center; padding: 24px;
+    overflow-y: auto;
+  }
+  .gate-card {
+    width: 100%; max-width: 440px;
+    background: var(--panel-solid); border: 1px solid var(--line-strong);
+    border-radius: 16px; padding: 30px 28px; box-shadow: var(--shadow);
+  }
+  .gate-card .mark {
+    width: 46px; height: 46px; border-radius: 12px; overflow: hidden;
+    background: radial-gradient(circle at 30% 30%, var(--accent), var(--accent-2) 70%);
+    display: grid; place-items: center; color: var(--accent-ink); font-weight: 800; margin-bottom: 16px;
+  }
+  .gate-card .mark img { width: 100%; height: 100%; object-fit: cover; }
+  .gate-card h2 { margin: 0 0 4px; font-size: 19px; }
+  .gate-card p.sub { margin: 0 0 18px; color: var(--text-dim); font-size: 13px; }
+  .gate-card .err { color: var(--danger); font-size: 12.5px; margin-top: 8px; min-height: 1.2em; }
+  .gate-card .linkish { background: none; border: 0; color: var(--accent); font-size: 12.5px; cursor: pointer; padding: 6px 0; }
+  .gate-steps { display: flex; gap: 6px; margin-bottom: 18px; }
+  .gate-steps i { flex: 1; height: 3px; border-radius: 2px; background: var(--line-strong); }
+  .gate-steps i.on { background: var(--accent); }
+
   /* ---- Update bar (Alfred home) ------------------------------------- */
   .updatebar {
     display: flex; align-items: center; gap: 10px;
@@ -397,6 +425,58 @@
 </head>
 <body>
 
+<!-- ============ LOCK SCREEN ============ -->
+<div class="gate" id="lockScreen" hidden>
+  <div class="gate-card">
+    <div class="mark"><img src="assets/alfred.png" alt="" onerror="this.replaceWith(document.createTextNode('A'))"></div>
+    <div id="lockMain">
+      <h2>Alfred needs an access code</h2>
+      <p class="sub" id="lockSub">Enter the code you were given to unlock the app.</p>
+      <div class="field"><input id="lockCode" placeholder="ALF-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false"></div>
+      <button class="btn primary" id="lockUnlock">Unlock</button>
+      <div class="err" id="lockErr"></div>
+      <button class="linkish" id="lockOwnerToggle">I'm the app owner</button>
+    </div>
+    <div id="lockOwner" hidden>
+      <h2>Owner setup</h2>
+      <p class="sub">Enter your admin key and pick a master password. This unlocks the Administration tab on any machine you install on.</p>
+      <div class="field"><label>License server URL</label><input id="ownServer" placeholder="https://alfred-license.…workers.dev" autocomplete="off"></div>
+      <div class="field"><label>Admin key</label><input id="ownKey" type="password" placeholder="your ADMIN_SECRET" autocomplete="off"></div>
+      <div class="field"><label>Master password (choose one)</label><input id="ownPass" type="password" placeholder="you'll use this to open Administration" autocomplete="off"></div>
+      <button class="btn primary" id="ownGo">Verify &amp; continue</button>
+      <div class="err" id="ownErr"></div>
+      <button class="linkish" id="ownBack">← back</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SETUP WIZARD ============ -->
+<div class="gate" id="setupWizard" hidden>
+  <div class="gate-card">
+    <div class="gate-steps"><i class="on" data-s="1"></i><i data-s="2"></i><i data-s="3"></i></div>
+    <div class="wiz-step" data-step="1">
+      <div class="mark"><img src="assets/alfred.png" alt="" onerror="this.replaceWith(document.createTextNode('A'))"></div>
+      <h2>Good to have you.</h2>
+      <p class="sub">A couple of quick questions and Alfred's ready. Everything else you can set up later from Settings.</p>
+      <button class="btn primary" id="wizNext1">Let's go</button>
+    </div>
+    <div class="wiz-step" data-step="2" hidden>
+      <h2>What should Alfred call you?</h2>
+      <p class="sub">Your first name is fine.</p>
+      <div class="field"><input id="wizName" placeholder="e.g. Alex" autocomplete="off"></div>
+      <div class="inline"><button class="btn ghost sm" id="wizBack2">Back</button><button class="btn primary" id="wizNext2">Next</button></div>
+      <div class="err" id="wizErr2"></div>
+    </div>
+    <div class="wiz-step" data-step="3" hidden>
+      <h2>What do you do?</h2>
+      <p class="sub">A sentence or two — Alfred and Ivy use this for context.</p>
+      <div class="field"><textarea id="wizBiz" rows="3" placeholder="e.g. I wholesale phone accessories to small shops; my mom handles customer service for a home-goods brand"></textarea></div>
+      <div class="inline"><button class="btn ghost sm" id="wizBack3">Back</button><button class="btn primary" id="wizDone">Finish setup</button></div>
+      <div class="err" id="wizErr3"></div>
+    </div>
+  </div>
+</div>
+
 <div class="app">
   <nav class="rail" id="rail">
     <div class="brand">
@@ -410,6 +490,7 @@
     <button class="navbtn" data-go="dash"><span class="ico">◎</span><span class="lbl">Revenue</span></button>
     <div class="spacer"></div>
     <button class="navbtn" data-go="settings"><span class="ico">⚙</span><span class="lbl">Settings</span></button>
+    <button class="navbtn" data-go="admin" id="navAdmin" hidden><span class="ico">🛡</span><span class="lbl">Admin</span></button>
     <div class="foot" id="railFoot">everything stays on this device</div>
   </nav>
 
@@ -712,6 +793,61 @@
         <button class="btn danger" id="wipeAll">Erase everything</button>
       </div>
     </section>
+
+    <!-- ============ ADMINISTRATION ============ -->
+    <section class="tab" data-tab="admin" hidden>
+      <div class="panel" id="adminLocked">
+        <h2>Administration <span class="who">owner</span></h2>
+        <p class="sub">Enter your master password to open the owner tools.</p>
+        <div class="field" style="max-width:320px"><input id="adminPass" type="password" placeholder="master password" autocomplete="off"></div>
+        <button class="btn primary sm" id="adminUnlock">Unlock</button>
+        <div class="err" id="adminErr" style="color:var(--danger);font-size:12.5px;margin-top:8px"></div>
+      </div>
+
+      <div id="adminTools" hidden>
+        <div class="grid cols-2">
+          <div class="panel">
+            <h2>Generate an access code</h2>
+            <div class="field"><label>Who is it for?</label><input id="genName" placeholder="e.g. Mom" autocomplete="off"></div>
+            <div class="field"><label>Expires (optional)</label><input id="genExpiry" type="date"></div>
+            <button class="btn primary sm" id="genBtn">Generate code</button>
+            <div id="genOut" class="empty" style="margin-top:12px">The new code appears here and is also saved to your backup file.</div>
+          </div>
+          <div class="panel">
+            <h2>Your backup file</h2>
+            <p class="sub">Every code you generate is appended to a CSV on this machine.</p>
+            <button class="btn sm" id="openCodes">Open codes folder</button>
+            <hr class="sep">
+            <h2>This install</h2>
+            <p class="sub" id="adminServerLine">—</p>
+            <div class="inline">
+              <button class="btn ghost sm" id="adminChangeServer">Change server URL</button>
+              <button class="btn ghost sm" id="adminOpenData">Open data folder</button>
+              <button class="btn ghost sm" id="adminRerun">Re-run setup wizard</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:16px">
+          <div class="inline" style="margin-bottom:10px">
+            <h2 style="margin:0">Codes &amp; who's using them</h2>
+            <span class="uspacer" style="flex:1"></span>
+            <button class="btn ghost sm" id="codesRefresh">Refresh</button>
+          </div>
+          <div class="scroll-x">
+            <table id="codesTable" style="width:100%;border-collapse:collapse;font-size:12.5px">
+              <thead><tr style="text-align:left;color:var(--text-dim)">
+                <th style="padding:6px 8px">Code</th><th style="padding:6px 8px">For</th>
+                <th style="padding:6px 8px">Status</th><th style="padding:6px 8px">Device</th>
+                <th style="padding:6px 8px">Last seen</th><th style="padding:6px 8px">Expires</th>
+                <th style="padding:6px 8px"></th>
+              </tr></thead>
+              <tbody id="codesBody"><tr><td colspan="7" class="faint" style="padding:14px 8px">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -781,6 +917,7 @@
   /* ===================================================================
      State
   =================================================================== */
+  const rawSavedSettings = store.get("settings", null); // null = truly fresh / wiped storage
   let settings = Object.assign({
     name: "", biz: "", voice: true, browserVoice: "",
     anthropic: "", model: "claude-sonnet-5",
@@ -825,12 +962,20 @@
   }
   function uid() { return Math.random().toString(36).slice(2, 10); }
 
+  let cfgSaveTimer = null;
   function persist() {
     store.set("settings", settings);
     store.set("orders", orders);
     store.set("emails", emails);
     store.set("ideas", ideas);
     // chat is intentionally not persisted — see the fresh-start note above
+    // durable mirror: keys + identity + data survive even a full storage wipe
+    if (NATIVE && NATIVE.config) {
+      clearTimeout(cfgSaveTimer);
+      cfgSaveTimer = setTimeout(() => {
+        NATIVE.config.save({ settings, orders, ideas, setupDone: store.get("setupDone", false) }).catch(() => {});
+      }, 400);
+    }
   }
 
   /* ===================================================================
@@ -863,6 +1008,7 @@
     store.set("tab", tab);
     if (tab === "dash") renderDash();
     if (tab === "alfred") renderAlfredHome();
+    if (tab === "admin" && typeof renderAdmin === "function") renderAdmin();
   }
   $$(".navbtn").forEach(b => b.addEventListener("click", () => go(b.dataset.go)));
 
@@ -2740,44 +2886,240 @@
   });
 
   /* ===================================================================
+     Licensing — access-code lock, owner setup, Administration tab
+  =================================================================== */
+  let isAdmin = false, adminUnlocked = false, licenseInfo = {};
+
+  function showGate(id) {
+    ["lockScreen", "setupWizard"].forEach(g => $("#" + g).hidden = (g !== id));
+    $(".app").style.filter = id ? "blur(3px)" : "";
+    if (id) $(".app").setAttribute("inert", ""); else $(".app").removeAttribute("inert");
+  }
+  function clearGates() { showGate(null); }
+
+  async function restoreFromConfigFile() {
+    if (!NATIVE || !NATIVE.config) return;
+    try {
+      const cfg = await NATIVE.config.load();
+      if (!cfg) return;
+      if (rawSavedSettings === null && cfg.settings) {          // localStorage was wiped — restore wholesale
+        Object.assign(settings, cfg.settings);
+        if (Array.isArray(cfg.orders) && cfg.orders.length) orders = cfg.orders;
+        if (Array.isArray(cfg.ideas) && cfg.ideas.length) ideas = cfg.ideas;
+        if (cfg.setupDone) store.set("setupDone", true);
+        store.set("settings", settings); store.set("orders", orders); store.set("ideas", ideas);
+        loadSettingsForm();
+      } else if (cfg.settings) {                                 // fill only blanks (keys the current store is missing)
+        let changed = false;
+        for (const k of ["name", "biz", "anthropic", "eleven", "elevenVoice", "gWebClientId", "rc", "browserVoice"])
+          if (!settings[k] && cfg.settings[k]) { settings[k] = cfg.settings[k]; changed = true; }
+        if (changed) { store.set("settings", settings); loadSettingsForm(); }
+      }
+    } catch {}
+  }
+
+  function wireLock() {
+    $("#lockOwnerToggle").addEventListener("click", () => { $("#lockMain").hidden = true; $("#lockOwner").hidden = false; $("#ownServer").value = licenseInfo.serverConfigured ? "" : ""; });
+    $("#ownBack").addEventListener("click", () => { $("#lockOwner").hidden = true; $("#lockMain").hidden = false; });
+    $("#lockUnlock").addEventListener("click", async () => {
+      const code = $("#lockCode").value.trim();
+      if (!code) return;
+      $("#lockErr").textContent = ""; $("#lockUnlock").disabled = true;
+      const r = await NATIVE.license.activate({ code });
+      $("#lockUnlock").disabled = false;
+      if (r.ok) { licenseInfo.activated = true; licenseInfo.name = r.name || ""; afterGatePassed(); return; }
+      $("#lockErr").textContent = ({
+        not_found: "That code isn't recognised.",
+        revoked: "That code has been turned off. Ask the owner for a new one.",
+        expired: "That code has expired.",
+        device_mismatch: "That code is already in use on another device.",
+        no_server: "This build isn't linked to a license server yet.",
+        unreachable: "Couldn't reach the license server — check your internet.",
+      })[r.reason] || ("Couldn't activate (" + (r.reason || "error") + ").");
+    });
+    $("#ownGo").addEventListener("click", async () => {
+      const su = $("#ownServer").value.trim(), key = $("#ownKey").value, pass = $("#ownPass").value;
+      if (!su || !key || !pass) { $("#ownErr").textContent = "Fill in all three."; return; }
+      $("#ownErr").textContent = ""; $("#ownGo").disabled = true;
+      const r = await NATIVE.license.setAdmin({ serverUrl: su, adminKey: key, masterPassword: pass });
+      $("#ownGo").disabled = false;
+      if (r.ok) { isAdmin = true; adminUnlocked = true; licenseInfo.activated = true; licenseInfo.isAdmin = true; afterGatePassed(); return; }
+      $("#ownErr").textContent = r.reason === "bad_admin_key" ? "That admin key was rejected." : ("Couldn't verify (" + (r.reason || "error") + ").");
+    });
+  }
+
+  function wireWizard() {
+    let step = 1;
+    const goStep = n => {
+      step = n;
+      $$(".wiz-step").forEach(s => s.hidden = Number(s.dataset.step) !== n);
+      $$(".gate-steps i").forEach(i => i.classList.toggle("on", Number(i.dataset.s) <= n));
+    };
+    $("#wizNext1").addEventListener("click", () => { $("#wizName").value = settings.name || licenseInfo.name || ""; goStep(2); });
+    $("#wizBack2").addEventListener("click", () => goStep(1));
+    $("#wizBack3").addEventListener("click", () => goStep(2));
+    $("#wizNext2").addEventListener("click", () => {
+      const v = $("#wizName").value.trim();
+      if (!v) { $("#wizErr2").textContent = "Alfred needs something to call you."; return; }
+      settings.name = v; $("#wizErr2").textContent = ""; goStep(3);
+    });
+    $("#wizDone").addEventListener("click", () => {
+      const v = $("#wizBiz").value.trim();
+      if (!v) { $("#wizErr3").textContent = "One sentence is enough — this helps Alfred a lot."; return; }
+      settings.biz = v; persist();
+      store.set("setupDone", true);
+      clearGates();
+      startApp();
+    });
+  }
+
+  function afterGatePassed() {
+    // license ok → wizard if needed, else straight into the app
+    if (!store.get("setupDone", false)) { showGate("setupWizard"); }
+    else { clearGates(); startApp(); }
+  }
+
+  async function initLicense() {
+    await restoreFromConfigFile();
+    if (!NATIVE || !NATIVE.license) {
+      // browser build: no enforcement possible — run open
+      if (!store.get("setupDone", false)) { store.set("setupDone", true); }
+      startApp();
+      return;
+    }
+    wireLock(); wireWizard();
+    try { licenseInfo = await NATIVE.license.status(); } catch { licenseInfo = {}; }
+    isAdmin = !!licenseInfo.isAdmin;
+    if (licenseInfo.isAdmin || licenseInfo.activated) { afterGatePassed(); }
+    else {
+      if (licenseInfo.lockedReason) $("#lockSub").textContent =
+        licenseInfo.lockedReason === "revoked" ? "This code has been turned off. Enter a new one, or contact the owner." :
+        licenseInfo.lockedReason === "expired" ? "This code has expired. Enter a current one." :
+        "This device isn't recognised for that code. Enter a code, or contact the owner.";
+      showGate("lockScreen");
+    }
+  }
+
+  /* ---- Administration tab ---- */
+  function wireAdmin() {
+    $("#adminUnlock").addEventListener("click", async () => {
+      const r = await NATIVE.license.checkMaster({ password: $("#adminPass").value });
+      if (r.ok) { adminUnlocked = true; renderAdmin(); }
+      else $("#adminErr").textContent = r.reason === "not_set" ? "No master password set on this install." : "Wrong password.";
+    });
+    $("#genBtn").addEventListener("click", async () => {
+      const name = $("#genName").value.trim();
+      const exp = $("#genExpiry").value ? new Date($("#genExpiry").value + "T23:59:59").toISOString() : null;
+      $("#genBtn").disabled = true;
+      const r = await NATIVE.license.adminCall({ path: "/admin/generate", body: { name, expiresAt: exp } });
+      $("#genBtn").disabled = false;
+      const out = $("#genOut");
+      if (r.ok) {
+        out.className = "";
+        out.innerHTML = `<div style="font:600 16px var(--mono);letter-spacing:1px;color:var(--accent)">${esc(r.code)}</div>` +
+          `<div class="foot faint" style="margin-top:6px">for ${esc(name || "—")}${r.expiresAt ? " · expires " + fmtDate(r.expiresAt) : ""} · saved to your backup file</div>` +
+          `<button class="btn ghost sm" style="margin-top:8px" id="copyGen">Copy</button>`;
+        $("#copyGen").onclick = () => navigator.clipboard.writeText(r.code).catch(() => {});
+        $("#genName").value = ""; $("#genExpiry").value = "";
+        loadCodes();
+      } else out.textContent = "Couldn't generate — " + (r.reason || "error");
+    });
+    $("#codesRefresh").addEventListener("click", loadCodes);
+    $("#openCodes").addEventListener("click", () => NATIVE.license.openCodesFile());
+    $("#adminOpenData").addEventListener("click", () => NATIVE.app.openDataFolder());
+    $("#adminRerun").addEventListener("click", () => { store.set("setupDone", false); location.reload(); });
+    $("#adminChangeServer").addEventListener("click", async () => {
+      const su = prompt("License server URL:", licenseInfo.serverUrl || "");
+      if (su) { await NATIVE.license.setServer({ serverUrl: su.trim() }); location.reload(); }
+    });
+  }
+  async function loadCodes() {
+    const body = $("#codesBody");
+    body.innerHTML = `<tr><td colspan="7" class="faint" style="padding:14px 8px">Loading…</td></tr>`;
+    const r = await NATIVE.license.adminCall({ path: "/admin/list", body: {} });
+    if (!r.ok) { body.innerHTML = `<tr><td colspan="7" class="faint" style="padding:14px 8px">Couldn't load (${esc(r.reason || "error")})</td></tr>`; return; }
+    if (!r.codes.length) { body.innerHTML = `<tr><td colspan="7" class="faint" style="padding:14px 8px">No codes yet.</td></tr>`; return; }
+    body.replaceChildren(...r.codes.map(c => {
+      const tr = el("tr", { style: "border-top:1px solid var(--line)" });
+      const td = (h) => el("td", { style: "padding:6px 8px", html: h });
+      const pill = { active: "ok", unused: "warn", revoked: "danger", expired: "dim" }[c.status] || "";
+      tr.append(
+        td(`<span style="font:12px var(--mono)">${esc(c.code)}</span>`),
+        td(esc(c.name || "—")),
+        td(`<span class="pill ${pill}">${c.status}</span>`),
+        td(esc(c.deviceName || "—")),
+        td(c.lastSeen ? fmtDate(c.lastSeen) : "—"),
+        td(c.expiresAt ? fmtDate(c.expiresAt) : "—"),
+      );
+      const acts = el("td", { style: "padding:6px 8px;white-space:nowrap" });
+      const mkBtn = (label, path, confirmMsg) => el("button", {
+        class: "btn ghost sm", style: "margin-left:4px", text: label,
+        onclick: async () => {
+          if (confirmMsg && !confirm(confirmMsg)) return;
+          await NATIVE.license.adminCall({ path, body: { code: c.code } });
+          loadCodes();
+        },
+      });
+      if (c.revoked) acts.append(mkBtn("un-revoke", "/admin/unrevoke"));
+      else acts.append(mkBtn("revoke", "/admin/revoke", `Turn off code ${c.code} (${c.name || "no name"})?`));
+      if (c.deviceName) acts.append(mkBtn("release device", "/admin/release", `Unbind ${c.code} from ${c.deviceName}? They'll be able to activate on a new machine.`));
+      tr.append(acts);
+      return tr;
+    }));
+  }
+  function renderAdmin() {
+    $("#navAdmin").hidden = !isAdmin;
+    if (!isAdmin) return;
+    $("#adminLocked").hidden = adminUnlocked;
+    $("#adminTools").hidden = !adminUnlocked;
+    if (adminUnlocked) {
+      $("#adminServerLine").textContent = "Server: " + (licenseInfo.serverUrl || licenseInfo.serverConfigured ? "configured" : "not set") + " · device: " + (licenseInfo.deviceName || "?");
+      loadCodes();
+    }
+  }
+
+  /* ===================================================================
      Boot
   =================================================================== */
+  function startApp() {
   loadSettingsForm();
   updateModeChip();
+  renderAdmin();
   // open on a clean chat with one short hello from Alfred (not persisted)
+  chat.length = 0;
   chat.push({ role: "assistant", content: `${greetingText()} ${greetingSub()}\n\nWhat can I do for you?` });
   renderChat();
   refreshAll();
-  go(store.get("tab", "alfred"));
+  go(store.get("tab", "alfred") === "admin" ? "alfred" : store.get("tab", "alfred"));
   if (NATIVE || SERVED) gmailBoot();
   initUpdates();
   initBrain();
-
-  // greet — once we know voices are likely ready
-  function bootGreeting() {
-    renderGreeting();
-    const line = greetingText() + " " + greetingSub();
-    if (settings.voice) {
-      // give the browser a beat to load voices / settle autoplay policy
-      setTimeout(() => speak(line), 350);
-    }
+  if (NATIVE && NATIVE.license) wireAdmin();
+  bootGreeting();
+  if (firstRun && !NATIVE) fixCard("Welcome — Alfred is set up with sample data", [
+    "The orders and emails are examples — edit or clear them.",
+    "Tell Alfred your name and what you do in Settings so he's useful.",
+  ], "info", { once: "firstrun", autohide: false });
   }
-  if (document.readyState === "complete") bootGreeting();
-  else window.addEventListener("load", bootGreeting);
+
+  // gate first; startApp() runs once the license + setup wizard pass
+  initLicense();
+
+  // greet — called from startApp(); waits for the window if needed
+  function bootGreeting() {
+    const fire = () => {
+      renderGreeting();
+      if (settings.voice) setTimeout(() => speak(greetingText() + " " + greetingSub()), 350);
+    };
+    if (document.readyState === "complete") fire();
+    else window.addEventListener("load", fire, { once: true });
+  }
 
   // if autoplay was blocked, the first interaction anywhere releases the greeting
   window.addEventListener("pointerdown", function once() {
     window.removeEventListener("pointerdown", once);
     if (pendingSpeech) { const p = pendingSpeech; pendingSpeech = null; $("#replayVoice").style.boxShadow = ""; speak(p.text, p.who); }
   }, { once: true });
-
-  if (firstRun) {
-    fixCard("Alfred is set up with sample data", [
-      "The orders and emails you see are examples — edit or delete them freely.",
-      "Tell Alfred your name in Settings so he greets you properly.",
-      "Optional: add an Anthropic key (free-form chat) and an ElevenLabs key (real voice).",
-    ], "info", { once: "firstrun", autohide: false });
-  }
 
   // expose a hook for debugging
   window.__alfred = { settings, get orders() { return orders; }, get emails() { return emails; } };
