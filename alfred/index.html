@@ -790,7 +790,9 @@
   let orders = store.get("orders", null);
   let emails = store.get("emails", null);
   let ideas  = store.get("ideas", []);
-  let chat   = store.get("chat", []);
+  // chat starts fresh every time Alfred opens — no scrollback to wade through
+  let chat   = [];
+  store.del("chat");
 
   const firstRun = orders === null && emails === null;
   if (orders === null) orders = sampleOrders();
@@ -818,7 +820,7 @@
     store.set("orders", orders);
     store.set("emails", emails);
     store.set("ideas", ideas);
-    store.set("chat", chat.slice(-40));
+    // chat is intentionally not persisted — see the fresh-start note above
   }
 
   /* ===================================================================
@@ -2417,6 +2419,8 @@
   =================================================================== */
   loadSettingsForm();
   updateModeChip();
+  // open on a clean chat with one short hello from Alfred (not persisted)
+  chat.push({ role: "assistant", content: `${greetingText()} ${greetingSub()}\n\nWhat can I do for you?` });
   renderChat();
   refreshAll();
   go(store.get("tab", "alfred"));
