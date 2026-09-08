@@ -410,7 +410,7 @@
     <button class="navbtn" data-go="dash"><span class="ico">◎</span><span class="lbl">Revenue</span></button>
     <div class="spacer"></div>
     <button class="navbtn" data-go="settings"><span class="ico">⚙</span><span class="lbl">Settings</span></button>
-    <div class="foot">v0.1 · everything stays on this device</div>
+    <div class="foot" id="railFoot">everything stays on this device</div>
   </nav>
 
   <main class="main">
@@ -2127,7 +2127,10 @@
     if (!NATIVE || !NATIVE.updates) { bar.hidden = true; return; }
 
     let ver = "";
-    NATIVE.updates.version().then(v => { ver = v || ""; });
+    NATIVE.updates.version().then(v => {
+      ver = v || "";
+      if (ver) $("#railFoot").textContent = "v" + ver + " · stays on this device";
+    });
 
     function set(cls, message, button) {
       bar.hidden = false;
