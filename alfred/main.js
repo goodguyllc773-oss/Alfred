@@ -209,7 +209,7 @@ async function brainChat({ system, messages }) {
   try {
     const r = await fetch(OLLAMA + "/api/chat", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model: BRAIN_MODEL, messages: msgs, stream: false, options: { temperature: 0.6, num_ctx: 8192 } }),
+      body: JSON.stringify({ model: BRAIN_MODEL, messages: msgs, stream: false, keep_alive: "30m", options: { temperature: 0.5, num_ctx: 8192 } }),
       signal: AbortSignal.timeout(180000),
     });
     if (!r.ok) return { ok: false, error: "brain returned " + r.status };

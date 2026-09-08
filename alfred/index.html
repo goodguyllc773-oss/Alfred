@@ -2293,13 +2293,26 @@
     return acts;
   }
 
-  // ---- model reply: pull a trailing ```alfred-actions block ----
+  // ---- pull an action list out of a model reply (forgiving — small models are sloppy) ----
   function splitActions(reply) {
-    const m = String(reply).match(/```alfred-actions\s*([\s\S]*?)```/i);
-    if (!m) return { prose: reply, actions: null };
-    let actions = null;
-    try { actions = JSON.parse(m[1].trim()); } catch { try { actions = JSON.parse(m[1].replace(/,\s*]/g, "]").trim()); } catch {} }
-    return { prose: reply.replace(m[0], "").trim(), actions: Array.isArray(actions) ? actions : null };
+    const raw = String(reply);
+    let jsonStr = null, start = -1, len = 0, m;
+    if ((m = raw.match(/```(?:alfred-actions|actions|json)?\s*(\[[\s\S]*?\]),?\s*```/i))) { jsonStr = m[1]; start = m.index; len = m[0].length; }
+    else if ((m = raw.match(/(\[\s*\{[\s\S]*\}\s*),?\s*\]\s*`{0,3}\s*$/))) { jsonStr = m[1] + "]"; start = m.index; len = m[0].length; }
+    if (!jsonStr) return { prose: raw.trim(), actions: null };
+    let arr = null;
+    for (const s of [jsonStr, jsonStr.replace(/,(\s*[\]}])/g, "$1")]) { try { arr = JSON.parse(s); break; } catch {} }
+    if (!Array.isArray(arr)) return { prose: raw.trim(), actions: null };
+    const norm = arr.map(a => {
+      if (!a || typeof a !== "object") return null;
+      let d = String(a.do || a.action || a.tool || a.name || a.type || "").replace(/\{.*$/, "").replace(/[^a-z_]/gi, "").toLowerCase();
+      if (!ACT[d]) return null;
+      const o = { ...a, do: d };
+      delete o.action; delete o.tool; delete o.name; delete o.type;
+      return o;
+    }).filter(Boolean);
+    const prose = (raw.slice(0, start) + raw.slice(start + len)).replace(/```[a-z-]*\s*```/gi, "").trim();
+    return { prose, actions: norm.length ? norm : null };
   }
 
   // ---- run one action, return a short "done" line ----
@@ -2400,12 +2413,16 @@
       `Be concise — short paragraphs or tight bullets. Never invent an order, email, date or number that isn't in the data; if something's missing, say what you'd need.`,
       `You also built and maintain this application and know it end to end (Gmail via a Google App Password over IMAP, ElevenLabs voices, the auto-updater, local-brain setup, storage). When ${name} reports a problem, diagnose from APP STATUS + the notes, say plainly what's wrong, give numbered steps, and mention they can ask you to run a live check ("test my brain", "test my elevenlabs key", "check for updates", "test gmail").`,
       ``,
-      `DELEGATION — you can make the team act. When you decide to act, END your reply with a fenced block:`,
-      '```alfred-actions',
-      `[{"do":"draft_reply","match":"Henderson","note":"acknowledge, give a refund timeline"},{"do":"trash","match":"newsletters"}]`,
-      '```',
-      `Valid "do": brief_inbox · recap_orders · ideas{context} · simplify · goto{tab} · draft_reply{match,note} · send_email{to,subject,body} · archive{match} · trash{match} · add_order{item,vendor,eta} · update_order{match,changes} · save_idea{text}. "match" is a name / sender / subject word / "the urgent ones" / "newsletters" / "unread".`,
-      `Rules: only include actions you are confident about. If a reference is ambiguous, or you'd need the recipient or wording, DON'T guess — ask ${name} in the prose part instead. Sending an email is ALWAYS shown to ${name} in full first; trashing/archiving/order changes are confirmed before they run — you don't need to ask separately, the app handles the confirm, but do say what you intend. Keep the prose part to one or two sentences.`,
+      compact
+        ? `TO MAKE THE TEAM ACT: end your reply with one JSON array on its own line, nothing after it. Example:\n[{"do":"draft_reply","match":"BigBuyer","note":"apologise, offer a fix"},{"do":"trash","match":"newsletters"}]\n"do" is one of: brief_inbox, recap_orders, ideas, draft_reply, trash, archive, add_order, goto, save_idea. "match" = a sender/subject word or "the urgent ones" / "newsletters" / "unread". If you're not sure which email/order, ASK in the sentence above instead of guessing. If no action is needed, don't add the array.`
+        : [
+          `DELEGATION — you can make the team act. When you decide to act, END your reply with a fenced block:`,
+          '```alfred-actions',
+          `[{"do":"draft_reply","match":"Henderson","note":"acknowledge, give a refund timeline"},{"do":"trash","match":"newsletters"}]`,
+          '```',
+          `Valid "do": brief_inbox · recap_orders · ideas{context} · simplify · goto{tab} · draft_reply{match,note} · send_email{to,subject,body} · archive{match} · trash{match} · add_order{item,vendor,eta} · update_order{match,changes} · save_idea{text}. "match" is a name / sender / subject word / "the urgent ones" / "newsletters" / "unread".`,
+          `Rules: only include actions you are confident about. If a reference is ambiguous, or you'd need the recipient or wording, DON'T guess — ask ${name} in the prose part instead. Sending an email is ALWAYS shown to ${name} in full first; trashing/archiving/order changes are confirmed before they run — you don't need to ask separately, the app handles the confirm, but do say what you intend. Keep the prose part to one or two sentences.`,
+        ].join("\n"),
       `Today is ${new Date().toDateString()}, ${new Date().toLocaleTimeString()}.`,
       ``,
       `APP STATUS:`,
