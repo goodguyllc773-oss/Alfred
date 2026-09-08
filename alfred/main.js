@@ -277,7 +277,9 @@ async function post(pathname, body) {
 }
 
 function codesBackupFile() {
-  const dir = path.join(app.getPath("documents"), "Alfred");
+  // owner's emergency backup folder on the Desktop, else Documents\Alfred
+  const desk = path.join(app.getPath("desktop"), "alfred safety");
+  const dir = fs.existsSync(desk) ? desk : path.join(app.getPath("documents"), "Alfred");
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   return path.join(dir, "access-codes.csv");
 }
