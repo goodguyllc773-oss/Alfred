@@ -35,6 +35,31 @@ build, opened straight in a browser.
 Still no lint or test setup. See `alfred/README.md` for the one-time Google Cloud /
 OAuth setup needed before Gmail will connect.
 
+## Syncing across machines (Mac / Windows / cloud)
+
+This repo is the shared source of truth across every machine this project is
+worked on from (Mac, Windows, a cloud session). Git only moves tracked source
+files - it does not carry over anything gitignored, so two things are
+per-machine setup, not something a pull brings with it:
+
+- `node_modules/` - run `npm install` in `alfred/` after pulling on a machine
+  that doesn't have it yet (or whose `package.json`/`package-lock.json` changed).
+- `alfred/.env` - the Google/Gmail OAuth credentials. Deliberately not
+  committed; each machine needs its own, per the one-time setup in
+  `alfred/README.md`.
+
+The rhythm, on whichever machine (or session) you're about to work from:
+
+1. `git pull` before starting, to bring in anything committed elsewhere.
+2. Make changes.
+3. `git commit` + `git push` when done, so the other machines can pull it next.
+
+The source itself (plain HTML/JS + Electron) is OS-agnostic, so a push from
+Windows is directly usable on Mac and vice versa with no translation needed.
+The one genuinely OS-specific step is building an installer - `npm run dist`
+produces a Windows `.exe` via electron-builder - that's a per-machine build
+step, not something git carries over.
+
 ## Architecture notes
 
 ### timebox-timer
