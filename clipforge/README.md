@@ -6,6 +6,9 @@ gaming, vlog), transcribe it **on your machine**, get a ranked review queue of
 MP4s with animated word-by-word captions. Nothing is uploaded and nothing is
 published automatically.
 
+**Working on ClipForge? Read `HANDOFF.md` first** (current state, what's verified,
+what's next).
+
 Status: milestone 1 (working vertical slice). See `docs/implementation-plan.md` for
 exactly what is done, what's only partly verified, and what's next.
 

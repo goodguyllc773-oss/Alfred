@@ -22,10 +22,11 @@ build, opened straight in a browser.
   unrelated to the other tools and self-contained. Python engine + FastAPI
   (`backend/clipforge/`), React/Vite/TS UI (`frontend/`), SQLite + Alembic, FFmpeg,
   faster-whisper. Unlike the rest of the repo it **has tests** (`pytest`, ~2 min,
-  needs ffmpeg on PATH). Read `clipforge/docs/architecture.md`,
+  needs ffmpeg on PATH). **Start with `clipforge/HANDOFF.md`** (see "ClipForge:
+  HANDOFF.md" below), then `clipforge/docs/architecture.md`,
   `clipforge/docs/decisions.md` and the status checklist in
-  `clipforge/docs/implementation-plan.md` before changing it; keep the checklist
-  honest (✅ only when implemented *and* tested).
+  `clipforge/docs/implementation-plan.md`; keep the checklist honest (✅ only when
+  implemented *and* tested).
 
 ## Running / developing
 
@@ -56,6 +57,53 @@ Schema changes: edit `backend/clipforge/db/models.py`, then from `backend/` run
 `alembic -c alembic.ini upgrade head` (throwaway `dev-clipforge.db`, gitignored) followed by
 `alembic -c alembic.ini revision --autogenerate -m "..."`, and review the generated file. Engine modules (`media`, `transcription`, `analysis`, `captions`,
 `render`, `profiles`) must not import `api` or `jobs`.
+
+## ClipForge: HANDOFF.md
+
+Before doing anything on `clipforge/`, read, in this order:
+
+1. **`clipforge/HANDOFF.md`**: current state, last verified commit, what's confirmed
+   working, what's pending or deferred, what's next. This is the file that changes
+   every session. Check it first, always, and run its "Step zero" (`git fetch
+   origin`, compare with the remote) before trusting it.
+2. **`clipforge/README.md`**: setup and launch commands.
+3. **`clipforge/docs/`** (`architecture.md`, `decisions.md`,
+   `implementation-plan.md`): kept current, the real source of truth for how the
+   system actually works.
+
+### Re-check HANDOFF.md
+
+Re-read `clipforge/HANDOFF.md` (don't rely on memory of an earlier read) whenever:
+
+- Starting a new session, especially on a different device.
+- Resuming after a gap: a date-change notice, or the user saying it's been a while.
+- The user asks you to check it.
+
+### Keep it current
+
+Update `clipforge/HANDOFF.md` at BOTH of these points. They're different events,
+not one:
+
+- **Before ending a work session**: the user says they're done, switching devices,
+  or closing out.
+- **Immediately before any context compaction**: the user says "compact" / "we're
+  gonna compact", or any other signal that one is about to happen. Compaction can
+  happen mid-session, not just at a natural stopping point, and whatever hasn't
+  been written to HANDOFF.md yet does not survive it. Don't wait for a better
+  moment: update it right then.
+
+Each update should capture:
+
+- The current commit (and branch).
+- What you tested/verified and how. Be specific: which machine, which video/file,
+  which page, what you actually saw (numbers, encoder, device).
+- Anything left broken, half-done, or explicitly deferred.
+- A concrete "what's next", not a vague one.
+
+Prune stale entries as they're resolved. HANDOFF.md describes the current state;
+history belongs in `git log` and `clipforge/docs/implementation-plan.md`. Commit
+and push it along with everything else. It only helps the next device (or the next
+session, post-compaction) if it's actually on `origin` before you stop.
 
 ## Syncing across machines (Mac / Windows / cloud)
 
