@@ -15,3 +15,12 @@ Thumbs.db
 .DS_Store
 *.log
 alfred/_*.log
+
+# ClipForge
+clipforge/frontend/dist/
+clipforge/backend/.venv/
+clipforge/backend/*.egg-info/
+clipforge/backend/dev-clipforge.db*
+**/__pycache__/
+.pytest_cache/
+clipforge/frontend/*.tsbuildinfo

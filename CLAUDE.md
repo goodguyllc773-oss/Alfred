@@ -18,6 +18,14 @@ build, opened straight in a browser.
   wrapper** (`main.js` / `preload.js` / `package.json`) that adds real Gmail access.
   When run in Electron the page sees `window.alfredNative`; without it, the Gmail
   features hide and everything else works as before.
+- `clipforge/` — a local-first AI clipping app (long video → captioned 9:16 clips),
+  unrelated to the other tools and self-contained. Python engine + FastAPI
+  (`backend/clipforge/`), React/Vite/TS UI (`frontend/`), SQLite + Alembic, FFmpeg,
+  faster-whisper. Unlike the rest of the repo it **has tests** (`pytest`, ~2 min,
+  needs ffmpeg on PATH). Read `clipforge/docs/architecture.md`,
+  `clipforge/docs/decisions.md` and the status checklist in
+  `clipforge/docs/implementation-plan.md` before changing it; keep the checklist
+  honest (✅ only when implemented *and* tested).
 
 ## Running / developing
 
@@ -34,6 +42,20 @@ build, opened straight in a browser.
 
 Still no lint or test setup. See `alfred/README.md` for the one-time Google Cloud /
 OAuth setup needed before Gmail will connect.
+
+`clipforge` (see `clipforge/README.md`):
+
+    cd clipforge/backend && python -m venv .venv && . .venv/bin/activate   # Windows: setup.cmd
+    pip install -e ".[dev]"
+    (cd ../frontend && npm ci && npm run build)
+    python -m pytest                      # full suite
+    python -m pytest tests/test_jobs.py   # one file
+    python -m clipforge serve --open      # http://127.0.0.1:8765/ (Windows: start.cmd)
+
+Schema changes: edit `backend/clipforge/db/models.py`, then from `backend/` run
+`alembic -c alembic.ini upgrade head` (throwaway `dev-clipforge.db`, gitignored) followed by
+`alembic -c alembic.ini revision --autogenerate -m "..."`, and review the generated file. Engine modules (`media`, `transcription`, `analysis`, `captions`,
+`render`, `profiles`) must not import `api` or `jobs`.
 
 ## Syncing across machines (Mac / Windows / cloud)
 
