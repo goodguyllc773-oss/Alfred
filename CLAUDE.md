@@ -60,6 +60,16 @@ Schema changes: edit `backend/clipforge/db/models.py`, then from `backend/` run
 
 ## ClipForge: HANDOFF.md
 
+**Step 0: ClipForge work happens on the user's own computer, never silently in
+the cloud.** Before any ClipForge work, check where this session runs. If
+`CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set,
+or it's Linux with no `C:` drive, it's a cloud container. In that case, stop and
+tell the user in your first reply, and send them to a new local Claude Code
+session on `C:\Users\xalex\clipforge` (or on `C:\Users\xalex` until that
+folder exists). Continue in the cloud only if they explicitly ask. A whole
+session ran in the cloud by accident on 2026-10-29; see `clipforge/CLAUDE.md`,
+"Step 0".
+
 Before doing anything on `clipforge/`, read, in this order:
 
 1. **`clipforge/HANDOFF.md`**: current state, last verified commit, what's confirmed

@@ -1,6 +1,28 @@
 # CLAUDE.md
 
-Before doing anything else, read, in this order:
+## Step 0, before anything: is this session on the user's computer?
+
+ClipForge is built and run **locally** (the Windows PC; the Mac second). A cloud
+session (a temporary Linux container) can't use the PC, its GPU, the user's
+videos or their `gh` login. On 2026-10-29 a whole session ran in the cloud by
+accident, and the user only found out when the work needed their PC. **Never
+again.**
+
+- The repo's own hook (`.claude/settings.json` → `scripts/where-am-i.mjs`) checks
+  this at every session start and prints "[ClipForge location check] …".
+- No hook output? Check by hand. `CLAUDE_CODE_REMOTE_SESSION_ID` or
+  `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` being set, or Linux with no `C:` drive,
+  means a cloud session.
+- **If it's a cloud session: stop before any other work.** In your first reply,
+  tell the user plainly that this session is running in the cloud, not on their
+  PC. Tell them to start a new Claude Code session in the desktop app and choose
+  the folder `C:\Users\xalex\clipforge` on their computer (not a GitHub repo,
+  not the "Default" environment). Continue in the cloud only if the user
+  explicitly asks for that task to be done there.
+
+## Read first
+
+Then read, in this order:
 
 1. **HANDOFF.md**: current state, last verified commit, what's confirmed working,
    what's pending or deferred, what's next. This file changes every session. Check

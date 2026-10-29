@@ -17,6 +17,10 @@ PC**: that's the next job after the repo exists._
 
 ## Step zero, every session: fetch before trusting this file
 
+**First: is this session on the user's computer?** If the "[ClipForge location
+check]" line says CLOUD, stop. Tell the user, and send them to a local session
+on `C:\Users\xalex\clipforge` (see CLAUDE.md, "Step 0"). Only then:
+
 **Before reading anything else, run `git fetch origin` and compare local HEAD to
 `origin/main`.** The SessionStart hook (`scripts/repo-sync.mjs`) does this
 automatically and reports "[ClipForge repo sync …]". With no such line, run

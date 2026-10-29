@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/where-am-i.mjs",
+            "timeout": 10,
+            "statusMessage": "Checking where this ClipForge session is running…"
+          }
+        ]
+      }
+    ]
+  }
+}
