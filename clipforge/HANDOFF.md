@@ -8,10 +8,11 @@ _Last updated 2026-10-29 (cloud session, Linux container, no GPU). **Where we le
 off:** ClipForge has been **moved into its own repo**, `goodguyllc773-oss/clipforge`
 (public, branch `main`), with its history kept. It now has MCC-style "start it up"
 support (`npm run dev` / `start-dev.cmd` / `.claude/launch.json`) and a
-session-start sync hook. **⚠ The GitHub repo doesn't exist yet:** Claude's GitHub
-integration isn't allowed to create repositories (403), so the user has to create
-it (see "Pending: create the GitHub repo"). Until then, the newest work is backed
-up inside the old Alfred branch. Milestone 1 has still **never run on the Windows
+session-start sync hook. **⚠ The GitHub repo doesn't exist yet.** The user chose
+**option (a)**: Claude creates it from a local session on the Windows PC with the
+user's `gh` login (see "Pending: create the GitHub repo"). Until then, everything
+lives in the Alfred branch `claude/clipforge-local-first-ai-ojxjpr`, under
+`clipforge/`. Milestone 1 has still **never run on the Windows
 PC**: that's the next job after the repo exists._
 
 ## Step zero, every session: fetch before trusting this file
@@ -26,20 +27,44 @@ cloud sessions); a stale checkout means a stale HANDOFF.
 - If this file says something different from `git log`, trust `git log` and fix
   this file.
 
-## Pending: create the GitHub repo (user step, once)
+## Pending: create the GitHub repo — option (a), from a Claude Code session ON THE WINDOWS PC
 
-1. On github.com, signed in as **goodguyllc773-oss**: **New repository** → name
-   `clipforge`, **Public**, and **no** README, .gitignore or license (it must be
-   empty).
-2. If the Claude GitHub App is installed for "Only select repositories", add
-   `clipforge` to it: GitHub → Settings → Applications → Claude → Configure.
-3. Tell Claude. Claude then pushes `main` from wherever this repo was prepared.
-   - If that cloud container is gone, re-create the repo from the backup:
-     `git subtree split --prefix=clipforge` on Alfred's branch
-     `claude/clipforge-local-first-ai-ojxjpr`, then push the result to the new
-     repo's `main`.
-4. After the push: replace `clipforge/` on that Alfred branch with a pointer to
-   the new repo, so there's one copy. It was never merged into Alfred's `main`.
+**The user chose option (a) (2026-10-29):** Claude creates the repo from a
+**local** Claude Code session on the Windows PC, using the user's own `gh` login.
+A cloud session can't do it: the Claude GitHub App gets `403 Resource not
+accessible by integration` on repo creation, and a cloud container has no `gh`
+login and can't reach the PC.
+
+**Source of truth until this is done:** the Alfred repo, branch
+`claude/clipforge-local-first-ai-ojxjpr`, folder `clipforge/`. It is complete:
+code, docs, this file, the launcher and the sync hook. It was never merged into
+Alfred's `main`, and must not be.
+
+Steps (run them yourself, in this order; don't hand them to the user):
+
+1. `gh auth status` should show **goodguyllc773-oss**. If not logged in, ask the
+   user to run `gh auth login` (browser sign-in). Never handle their password.
+2. `gh repo view goodguyllc773-oss/clipforge` should say "not found". If the repo
+   already exists, STOP and ask the user; don't overwrite anything.
+3. Get the branch into a scratch clone outside AppData:
+   `git clone --branch claude/clipforge-local-first-ai-ojxjpr https://github.com/goodguyllc773-oss/Alfred.git C:\Users\xalex\alfred-split`
+4. Split `clipforge/` out with its history:
+   `git -C C:\Users\xalex\alfred-split subtree split --prefix=clipforge -b clipforge-main`
+   (Git for Windows ships `git subtree`). The log of `clipforge-main` should start
+   with the milestone 1 commit.
+5. `gh repo create goodguyllc773-oss/clipforge --public --description "Local-first AI clipping: long videos in, captioned vertical clips out. Runs on your own machine."`
+   Public was the user's choice. Pass no `--clone` and no README flags: the repo
+   must start empty.
+6. `git -C C:\Users\xalex\alfred-split push https://github.com/goodguyllc773-oss/clipforge.git clipforge-main:main`
+7. `git clone https://github.com/goodguyllc773-oss/clipforge.git C:\Users\xalex\clipforge`
+   Check it: `git log --oneline` shows the carried-over commits, and `CLAUDE.md`,
+   `HANDOFF.md`, `start-dev.cmd`, `setup.cmd` and `scripts\repo-sync.mjs` exist.
+8. Delete the scratch clone `C:\Users\xalex\alfred-split`.
+9. Tell the user to reopen Claude Code **in `C:\Users\xalex\clipforge`**, so that
+   repo's CLAUDE.md applies. Then continue with "First run on the Windows PC"
+   below, starting at step 2.
+10. Later, ask before doing it: replace `clipforge/` on the Alfred branch with a
+    one-line pointer to the new repo, so there's one copy.
 
 ## Current state
 
@@ -102,9 +127,9 @@ cloud sessions); a stale checkout means a stale HANDOFF.
 This has **never been done**. Do it in order, and record what you actually see
 here.
 
-1. **Get the code** (after the GitHub repo exists):
-   `git clone https://github.com/goodguyllc773-oss/clipforge.git C:\Users\xalex\clipforge`.
-   If you put it elsewhere, fix the path in CLAUDE.md.
+1. **Get the code:** done by the option (a) steps above, which end with the repo
+   cloned at `C:\Users\xalex\clipforge`. If it's elsewhere, fix the path in
+   CLAUDE.md.
 2. **Prerequisites** (`setup.cmd` checks each one and prints the winget command):
    - Python 3.12: `winget install Python.Python.3.12`
    - FFmpeg: `winget install Gyan.FFmpeg`. Open a new terminal afterwards so PATH
@@ -149,6 +174,18 @@ here.
     push.
 
 ## Last verified working (2026-10-29, cloud session)
+
+- **Local-first audit (code inspection; nothing run on Windows):**
+  - The app makes no outbound network calls: no HTTP client imports, and the UI
+    only fetches relative `/api`. The server binds 127.0.0.1 only and rejects
+    requests addressed to other hosts.
+  - The only runtime internet use is faster-whisper's **one-time** model download
+    from huggingface.co. With no connection, `huggingface_hub` 2.3.0 falls back to
+    the cached model; only a failing *proxy* raises an error instead.
+  - Setup-time internet: pip, npm, winget. Dev-time: GitHub and the sync hook.
+    Neither is part of the app.
+  - No cloud backend, accounts or billing exist. Future SaaS pieces are
+    documentation only (`docs/architecture.md`, "seams").
 
 - **The standalone repo, from a fresh clone layout:**
   - `scripts/setup-mac.sh` ran clean: venv, packages, `npm ci` + UI build, sync
@@ -251,9 +288,9 @@ the big ones as if the user had agreed:
 
 ## What's next
 
-1. **User:** create the empty public GitHub repo (see "Pending: create the GitHub
-   repo"). Then **Claude:** push `main`, and reduce Alfred's `clipforge/` to a
-   pointer.
+1. **On the Windows PC, in a local Claude Code session:** do the option (a) steps
+   in "Pending: create the GitHub repo" (create the repo with `gh`, split and push
+   from the Alfred branch, clone to `C:\Users\xalex\clipforge`).
 2. **First run on the Windows PC:** the runbook above, steps 1–10. Fix whatever
    breaks in the setup scripts; record real Whisper speed and NVENC.
 3. **Milestone 2** (details in `docs/implementation-plan.md`). First item: a local
