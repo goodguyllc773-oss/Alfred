@@ -19,9 +19,11 @@ build. The setup script checks each one and tells you the `winget` command if it
 missing.
 
 ```bat
+git clone https://github.com/goodguyllc773-oss/clipforge.git
 cd clipforge
 setup.cmd          :: add -Gpu to install CUDA libs for GPU transcription without asking
 start.cmd          :: opens http://127.0.0.1:8765/
+start-dev.cmd      :: dev servers instead: API :8765 + hot-reload UI :5173
 ```
 
 `setup.cmd` creates `backend\.venv`, installs the Python packages there, offers the
@@ -42,12 +44,9 @@ huggingface.co into `%LOCALAPPDATA%\ClipForge\models`. After that it works offli
 ## Install (macOS / Linux, or manual)
 
 ```bash
-cd clipforge/backend
-python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-(cd ../frontend && npm ci && npm run build)
-python -m clipforge doctor
-python -m clipforge serve --open
+git clone https://github.com/goodguyllc773-oss/clipforge.git && cd clipforge
+scripts/setup-mac.sh                # venv, packages, UI build, Claude sync hook, doctor
+open start-dev.command              # dev servers (or: npm run dev)
 ```
 
 ## Use
@@ -68,12 +67,12 @@ Only clip footage you have the rights to edit and post.
 ## Develop
 
 ```bash
-# backend API + worker on :8765 (CLIPFORGE_TRANSCRIBER=sidecar skips Whisper)
-cd clipforge/backend && python -m clipforge serve
-# UI with hot reload on :5173 (proxies /api to :8765)
-cd clipforge/frontend && npm run dev
+# API + worker on :8765 and hot-reload UI on :5173, in one window (Ctrl+C stops both)
+npm run dev
+# keep GitHub and this machine in step (also runs at every Claude session start)
+npm run sync
 # tests (needs ffmpeg/ffprobe on PATH; ~2 min)
-cd clipforge/backend && python -m pytest
+cd backend && .venv/bin/python -m pytest      # Windows: .venv\Scripts\python -m pytest
 # real-Whisper test (needs network the first time):
 CLIPFORGE_TEST_WHISPER_MODEL=tiny.en python -m pytest -m whisper
 ```

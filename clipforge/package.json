@@ -1,0 +1,11 @@
+{
+  "name": "clipforge",
+  "private": true,
+  "description": "Repo-level scripts. The app itself is backend/ (Python) + frontend/ (Vite).",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "sync": "node scripts/repo-sync.mjs --plain",
+    "install-hook": "node scripts/install-sync-hook.mjs",
+    "build": "npm --prefix frontend run build"
+  }
+}

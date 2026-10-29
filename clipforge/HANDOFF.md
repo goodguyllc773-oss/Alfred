@@ -5,123 +5,188 @@ Update it before you stop, and immediately before any context compaction (see
 CLAUDE.md, "ClipForge: HANDOFF.md", for the exact rule).
 
 _Last updated 2026-10-29 (cloud session, Linux container, no GPU). **Where we left
-off:** milestone 1, the first working vertical slice, is built, tested and pushed:
-import → transcribe → candidate clips → review → render → export. It's all on the
-branch `claude/clipforge-local-first-ai-ojxjpr`, **not merged to `main`**, and **no
-PR is open**. It has **never run on the Windows PC**: that first run (section
-"First run on the Windows PC") is the next job. Nothing is half-done in the code;
-what's unverified is listed under "Not verified yet"._
+off:** ClipForge has been **moved into its own repo**, `goodguyllc773-oss/clipforge`
+(public, branch `main`), with its history kept. It now has MCC-style "start it up"
+support (`npm run dev` / `start-dev.cmd` / `.claude/launch.json`) and a
+session-start sync hook. **⚠ The GitHub repo doesn't exist yet:** Claude's GitHub
+integration isn't allowed to create repositories (403), so the user has to create
+it (see "Pending: create the GitHub repo"). Until then, the newest work is backed
+up inside the old Alfred branch. Milestone 1 has still **never run on the Windows
+PC**: that's the next job after the repo exists._
 
 ## Step zero, every session: fetch before trusting this file
 
 **Before reading anything else, run `git fetch origin` and compare local HEAD to
-the remote branch.** This repo is worked on from several machines (Windows PC, Mac,
-cloud sessions). A stale checkout means a stale HANDOFF.
+`origin/main`.** The SessionStart hook (`scripts/repo-sync.mjs`) does this
+automatically and reports "[ClipForge repo sync …]". With no such line, run
+`npm run sync`. This repo is worked on from several machines (Windows PC, Mac,
+cloud sessions); a stale checkout means a stale HANDOFF.
 
-- ClipForge currently lives **only** on `claude/clipforge-local-first-ai-ojxjpr`.
-  `main` has no `clipforge/` folder yet. On a machine that's on `main`:
-  `git fetch origin && git switch claude/clipforge-local-first-ai-ojxjpr`.
 - If local is behind: `git pull --ff-only` *before* reading the rest of this file.
 - If this file says something different from `git log`, trust `git log` and fix
   this file.
 
+## Pending: create the GitHub repo (user step, once)
+
+1. On github.com, signed in as **goodguyllc773-oss**: **New repository** → name
+   `clipforge`, **Public**, and **no** README, .gitignore or license (it must be
+   empty).
+2. If the Claude GitHub App is installed for "Only select repositories", add
+   `clipforge` to it: GitHub → Settings → Applications → Claude → Configure.
+3. Tell Claude. Claude then pushes `main` from wherever this repo was prepared.
+   - If that cloud container is gone, re-create the repo from the backup:
+     `git subtree split --prefix=clipforge` on Alfred's branch
+     `claude/clipforge-local-first-ai-ojxjpr`, then push the result to the new
+     repo's `main`.
+4. After the push: replace `clipforge/` on that Alfred branch with a pointer to
+   the new repo, so there's one copy. It was never merged into Alfred's `main`.
+
 ## Current state
 
-- **Branch:** `claude/clipforge-local-first-ai-ojxjpr`, pushed and tracking origin.
-  - Last code commit: `7595bef` "clipforge: local-first AI clipping app —
-    milestone 1 vertical slice". This handoff is committed on top of it; see
-    `git log -1`.
-  - Not merged, no PR. Ask the user before opening one or merging into `main`.
-- **Where it has run:** only the 2026-10-29 cloud session:
+- **Repo:** `goodguyllc773-oss/clipforge` (public), branch `main`; check
+  `git log -1`. Not on GitHub yet (see above).
+- **History:** carried over from the Alfred repo with `git subtree split`:
+  - `2c8f233` milestone 1 vertical slice
+  - `c951c8c` HANDOFF.md + rules
+  - then the standalone-repo commit (CLAUDE.md, launcher, sync hook).
+- **Where it has run:** only 2026-10-29 cloud sessions:
   - Linux, Python 3.13, Node 22, FFmpeg 6.1.1, 4 CPUs, 15 GB RAM, **no GPU**.
   - **Windows PC: never set up. Mac: never set up.**
-- **Running servers:** none. The cloud session's server and data dir were
-  temporary and are gone; nothing carries over from them.
+- **Running servers:** none that matter. Cloud-session servers and data dirs were
+  temporary.
 - **Data:** none worth keeping exists anywhere yet. A fresh data dir is created on
   first start:
   - Windows: `%LOCALAPPDATA%\ClipForge`
   - Mac: `~/Library/Application Support/ClipForge`
-  - Linux: `~/.local/share/clipforge`
   - Override with `CLIPFORGE_DATA_DIR`.
-  - It holds `clipforge.db` (projects, transcripts, clips, jobs), `renders/`,
-    `models/` (Whisper downloads), `cache/` and `logs/`. **Not in git.**
-- **Database:** one Alembic migration, `0001_initial_schema`, applied
-  automatically on start. `alembic check` reported no drift from the models.
+  - It holds the DB, renders, models, cache and logs. **Not in git.**
+- **Database:** one Alembic migration, `0001_initial_schema`, applied automatically
+  on start. `alembic check` reported no drift.
 - **Per-machine setup (git doesn't carry it):**
-  - `clipforge/backend/.venv` (Python packages)
-  - `clipforge/frontend/node_modules` and `clipforge/frontend/dist` (built UI)
-  - the Whisper model in `models/`
-  - `setup.cmd` (Windows) creates all of them. After any pull that changes
-    `pyproject.toml` or `package-lock.json`, re-run it (it is safe to re-run).
-- **Gotcha #1:** the UI is served by the backend from `frontend/dist`. After
-  changing anything in `frontend/src`, run `npm run build` in `frontend/` (or use
-  `npm run dev` on :5173 for hot reload). Otherwise :8765 serves the old UI.
-- **Gotcha #2:** `CLIPFORGE_TRANSCRIBER=sidecar` makes the worker read
-  `.srt/.vtt/.json` files next to the video instead of running Whisper. That's how
-  the cloud session tested without a model. The default is `faster-whisper`.
-- **Gotcha #3:** `pkill -f "clipforge serve …"` run from a Bash tool call matches
-  its own shell and kills it (exit 144). Stop the server with Ctrl+C in its window,
-  or kill by PID.
-- **Gotcha #4:** in Playwright, `has-text("Approve")` matches case-insensitively,
-  so it also hits the "approved (0)" filter tab. Use the exact `✓ Approve` text.
-- **Gotcha #5:** huggingface.co was blocked by the cloud session's network policy,
-  so cloud sessions can't download Whisper models unless the environment's Network
-  access is changed. PyPI and npm work.
-- **Gotcha #6:** schema changes: edit `db/models.py`, then from `backend/` run
-  `alembic -c alembic.ini upgrade head` and then
-  `alembic -c alembic.ini revision --autogenerate -m "..."`. Autogenerating
-  against an empty DB re-emits the whole schema instead of a diff.
+  - `backend/.venv`, `frontend/node_modules`, `frontend/dist`, the Whisper model,
+    and the Claude sync hook in `~/.claude/settings.json`.
+  - `setup.cmd` (Windows) or `scripts/setup-mac.sh` (macOS) creates all of them.
+  - Re-run it after pulls that change dependencies; the sync hook says when.
+- **"Start it up":** `npm run dev` (`scripts/dev.mjs`) runs the API + worker on
+  :8765 and the hot-reload UI on :5173 (which proxies `/api`).
+  - Windows: Claude launches it with `explorer.exe "<repo>\start-dev.cmd"`.
+  - Mac: `open start-dev.command`.
+  - Then Claude opens http://127.0.0.1:5173/ in the built-in browser pane. See
+    CLAUDE.md, "Getting up and running".
+  - `start.cmd` is the non-dev way: the built UI on :8765.
+- **Gotcha #1 (Windows): AppData isn't shared with Claude's sandbox,** and
+  ClipForge keeps its DB, renders and Whisper models in `%LOCALAPPDATA%`. Start
+  servers and setup through `explorer.exe`, never as a plain tool-call process.
+- **Gotcha #2:** the UI on :8765 is `frontend/dist`. After changing
+  `frontend/src`, `npm run build`, or use the dev servers (:5173 hot-reloads).
+- **Gotcha #3:** `CLIPFORGE_TRANSCRIBER=sidecar` reads `.srt/.vtt/.json` files
+  next to the video instead of running Whisper. That's how cloud sessions test
+  without a model. The default is `faster-whisper`.
+- **Gotcha #4:** in a Bash tool call, `pkill -f` / `pgrep -f` / `kill $(…grep…)`
+  patterns match the tool's own shell command line and kill it. Put
+  process-hunting in a script file, or use `ps -eo pid,args` with a `[b]racket`
+  pattern.
+- **Gotcha #5:** in Playwright, `has-text("Approve")` also matches the
+  "approved (0)" tab. Use `✓ Approve`.
+- **Gotcha #6:** cloud sessions couldn't reach huggingface.co (network policy), so
+  no Whisper models there unless the environment's Network access allows it.
+- **Gotcha #7:** schema changes: `alembic -c alembic.ini upgrade head`, then
+  `revision --autogenerate`. Autogenerating against an empty DB re-emits the whole
+  schema.
+- **Gotcha #8:** MCC's setup recognises its hook by `sync-check.mjs` in the
+  command, so ClipForge's script is `repo-sync.mjs` and its installer matches
+  `repo-sync.mjs` + `clipforge`. Don't rename either to `sync-check.mjs`.
 
 ## First run on the Windows PC: the runbook
 
-This has **never been done**. Do it in order and record what you actually see here.
+This has **never been done**. Do it in order, and record what you actually see
+here.
 
-1. **Get the code:** in the Alfred clone,
-   `git fetch origin && git switch claude/clipforge-local-first-ai-ojxjpr && git pull --ff-only`.
+1. **Get the code** (after the GitHub repo exists):
+   `git clone https://github.com/goodguyllc773-oss/clipforge.git C:\Users\xalex\clipforge`.
+   If you put it elsewhere, fix the path in CLAUDE.md.
 2. **Prerequisites** (`setup.cmd` checks each one and prints the winget command):
-   - Python 3.10+ (3.12 recommended): `winget install Python.Python.3.12`
+   - Python 3.12: `winget install Python.Python.3.12`
    - FFmpeg: `winget install Gyan.FFmpeg`. Open a new terminal afterwards so PATH
      updates.
    - Node.js LTS: `winget install OpenJS.NodeJS.LTS`
-3. **`cd clipforge` then `setup.cmd -Gpu`.**
-   - `-Gpu` installs `nvidia-cublas-cu12` + `nvidia-cudnn-cu12==9.*` into the venv
-     without asking.
-   - It creates `backend\.venv`, runs `pip install -e backend[dev]`, builds the UI
-     and runs `clipforge doctor`.
-   - ⚠ **The PowerShell scripts have never been executed**: the cloud session had
-     no PowerShell. Expect to fix small script errors on this first run.
+3. **Setup:** `explorer.exe "C:\Users\xalex\clipforge\setup.cmd"`, or the user
+   double-clicks it.
+   - It creates `backend\.venv`, installs packages, offers the CUDA libraries
+     (`-Gpu` = yes), builds the UI, installs the Claude sync hook and runs
+     `clipforge doctor`.
+   - ⚠ **The PowerShell scripts have never been executed** (no PowerShell in the
+     cloud). Expect small fixes on this first run.
 4. **Check `doctor` output:**
-   - `h264_nvenc` should say **OK** (in the cloud it said "Cannot load
-     libcuda.so.1", which was expected with no GPU).
+   - `h264_nvenc` should say **OK**. In the cloud it said "Cannot load
+     libcuda.so.1", which was expected with no GPU.
    - `CUDA` should say **1 CUDA device(s)**.
-   - If CUDA shows 0 while `nvidia-smi` works, the DLL search-path helper
-     (`transcription/whisper.py` → `ensure_cuda_dll_dirs`, never run on Windows) is
-     the first suspect.
-5. **Run the tests:** `backend\.venv\Scripts\python -m pytest` from
-   `clipforge\backend`. Expect 101 passed, 1 skipped. Then the real-Whisper test:
-   `set CLIPFORGE_TEST_WHISPER_MODEL=tiny.en` and
-   `backend\.venv\Scripts\python -m pytest -m whisper`. The first run downloads
-   `tiny.en` from huggingface.co.
-6. **`start.cmd`**: it should open http://127.0.0.1:8765/. Settings →
-   Diagnostics should show NVENC ✓ and the CUDA device.
+   - If CUDA shows 0 while `nvidia-smi` works, suspect
+     `transcription/whisper.py` → `ensure_cuda_dll_dirs` first (never run on
+     Windows).
+5. **Tests:** `backend\.venv\Scripts\python -m pytest` in `backend\`. Expect 101
+   passed, 1 skipped. Then the real-Whisper test:
+   `set CLIPFORGE_TEST_WHISPER_MODEL=tiny.en` and `… -m pytest -m whisper`.
+6. **"Start it up":**
+   - `explorer.exe "C:\Users\xalex\clipforge\start-dev.cmd"`.
+   - Verify `:8765/api/health` reports `"worker":"running"` and :5173 answers.
+   - Open http://127.0.0.1:5173/ in the built-in browser pane.
+   - Settings → Diagnostics should show NVENC ✓ and the CUDA device.
 7. **A real end-to-end:**
-   - Make a project and import a real long video the user has rights to.
-   - The first transcription downloads `small` (≈460 MB).
-   - Record: transcription time per hour of audio, which device the transcript
-     shows (`cuda` vs `cpu`), and the render encoder (`h264_nvenc`?).
+   - Import a real long video the user has rights to. The first transcription
+     downloads `small` (≈460 MB).
+   - Record: transcription time per hour of audio, the transcript's device
+     (`cuda`/`cpu`), and the render encoder (`h264_nvenc`?).
    - Approve a clip, play it, export it, open the exported MP4.
-8. **Robustness checks:**
-   - Close the server mid-transcription and mid-render, start again, and confirm
-     the transcription resumes and the render re-runs.
-   - Unplug or rename a source file: it should show "missing" and relink should
-     work.
+8. **Robustness:**
+   - Close the dev-server window mid-transcription and mid-render, start again,
+     and confirm the transcription resumes and the render re-runs.
+   - Rename a source file: it should show "missing" and relink should work.
    - Paths with spaces and non-ASCII names.
-9. Update this file ("Current state" → where it has run, plus "Last verified
-   working"), then commit and push.
+9. **Next Claude session on that PC** should begin with a "[ClipForge repo sync …]"
+   line. If not, run `npm run install-hook`.
+10. Update this file ("Current state" + "Last verified working"), then commit and
+    push.
 
 ## Last verified working (2026-10-29, cloud session)
 
-- **Automated tests:** `python -m pytest` in `clipforge/backend` gave **101
+- **The standalone repo, from a fresh clone layout:**
+  - `scripts/setup-mac.sh` ran clean: venv, packages, `npm ci` + UI build, sync
+    hook, doctor.
+  - `pytest` from the repo's own `backend/.venv`: **101 passed, 1 skipped**
+    (101.6 s).
+- **`npm run dev`:**
+  - Both servers answered: `/api/health` → `{"ok":true,"worker":"running"}`, and
+    :5173 → 200, including `/api/health` proxied through :5173.
+  - Headless Chromium loaded the UI from :5173 with 0 console errors.
+  - **Bug found and fixed:** stopping the runner left Vite orphaned on :5173
+    (signalling `npm` doesn't reach `vite`). Children now get their own process
+    group and are stopped as a group, with SIGKILL after 5 s; Windows uses
+    `taskkill /T`.
+  - Re-tested two cases, and both left 0 processes and both ports closed:
+    - Ctrl+C to the runner;
+    - `kill -9` of the API (the runner then stopped the UI too).
+- **Sync hook** (`repo-sync.mjs`), against a local bare repo standing in for
+  GitHub plus a second clone as "the other machine": all 7 cases behaved as
+  designed.
+  - in sync → no change
+  - behind → fast-forward pull plus "re-read HANDOFF"
+  - ahead → pushed
+  - diverged → nothing changed, told to merge
+  - behind with uncommitted edits → nothing pulled, edits kept
+  - `frontend/package-lock.json` changed → "re-run setup" hint
+  - hook JSON (`SessionStart`) is well-formed
+- **Hook installer:** merged into a `settings.json` that already had MCC's
+  `sync-check.mjs` hook, leaving MCC's entry untouched; a re-run said "already
+  installed".
+- **Not verified:**
+  - `start-dev.cmd` / `setup.cmd` via `explorer.exe` on Windows;
+  - the Windows `taskkill` path;
+  - the hook against the real GitHub remote (it doesn't exist yet).
+
+**Milestone 1 itself (same day, before the move):**
+
+- **Automated tests:** `python -m pytest` in `backend/` gave **101
   passed, 1 skipped** in 103 s.
   - The skip is `test_real_whisper_transcribes_synthetic_speech`, which needs a
     downloaded model.
@@ -161,7 +226,6 @@ This has **never been done**. Do it in order and record what you actually see he
 All recorded with reasons in `docs/decisions.md` (D1–D12). Ask before relying on
 the big ones as if the user had agreed:
 
-- ClipForge lives in the Alfred repo as `clipforge/`, not its own repo.
 - The UI is a localhost web page for now; Tauri was deferred.
 - A SQLite job queue (no Redis/Celery).
 - Default Whisper model `small`.
@@ -187,9 +251,11 @@ the big ones as if the user had agreed:
 
 ## What's next
 
-1. **First run on the Windows PC:** the runbook above, steps 1–9. Fix whatever
-   breaks in the setup scripts, and record real Whisper speed and NVENC.
-2. Ask the user whether to **open a PR / merge into `main`** once step 1 passes.
+1. **User:** create the empty public GitHub repo (see "Pending: create the GitHub
+   repo"). Then **Claude:** push `main`, and reduce Alfred's `clipforge/` to a
+   pointer.
+2. **First run on the Windows PC:** the runbook above, steps 1–10. Fix whatever
+   breaks in the setup scripts; record real Whisper speed and NVENC.
 3. **Milestone 2** (details in `docs/implementation-plan.md`). First item: a local
    semantic re-ranker through Ollama (`analysis/semantic.py` is the plug-in point),
    plus a small hand-labelled set of real videos to measure pick quality.

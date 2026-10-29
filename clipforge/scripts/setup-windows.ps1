@@ -9,7 +9,8 @@
     3. creates backend\.venv and installs ClipForge's Python packages into it
     4. if an NVIDIA GPU is present, offers the CUDA libraries faster-whisper needs (pip, into the venv)
     5. builds the web UI if Node.js is available
-    6. runs `clipforge doctor`
+    6. installs the Claude SessionStart sync hook (scripts/install-sync-hook.mjs)
+    7. runs `clipforge doctor`
 #>
 param([switch]$Gpu, [switch]$NoGpu, [switch]$Yes)
 $ErrorActionPreference = "Stop"
@@ -76,6 +77,10 @@ if (Have "npm") {
   Write-Host "or run the UI in dev mode later. The API still works without it."
 }
 
+Step "Claude session sync hook"
+if (Have "node") { node (Join-Path $PSScriptRoot "install-sync-hook.mjs") }
+else { Write-Host "Node.js not found - skipped the Claude sync hook (re-run setup after installing Node)." -ForegroundColor Yellow }
+
 Step "Diagnostics"
 & $Py -m clipforge doctor
-Write-Host "`nDone. Start ClipForge with:  .\start.cmd" -ForegroundColor Green
+Write-Host "`nDone. Start ClipForge with:  .\start.cmd   (dev servers: .\start-dev.cmd)" -ForegroundColor Green

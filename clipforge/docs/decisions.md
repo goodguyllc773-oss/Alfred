@@ -2,11 +2,12 @@
 
 Short records of choices that shape the codebase. Newest last.
 
-## D1. A new top-level `clipforge/` directory in this repo
-The repository is a collection of independent tools (one per top-level directory).
-Nothing in `alfred/` or `timebox-timer/` is related to video, so ClipForge lives in
-its own directory and touches nothing else. It could be split into its own repo
-later without changes (no cross-directory imports).
+## D1. Its own repository
+ClipForge started as a `clipforge/` folder in the user's `Alfred` tools repo and was
+moved (with its history, via `git subtree split`) into its own public repo,
+`goodguyllc773-oss/clipforge`, on 2026-10-29 at the user's request. That matches how
+the user's other projects (MCC, AmtrackAIO) are organised: own HANDOFF.md, own
+CLAUDE.md, own session-sync hook.
 
 ## D2. Python engine + FastAPI, React/Vite UI, Tauri deferred
 Video tooling (faster-whisper, OpenCV, numpy) is Python-native, so the engine is
@@ -56,7 +57,7 @@ the seam for a remote worker later.
 Milestone 1 ships `heuristic-v1`: named structural features × per-profile weights,
 with evidence strings. It is labelled as a baseline everywhere it's shown. A
 `SemanticScorer` protocol is the plug-in point for a local LLM (Ollama is already
-used by the Alfred tool in this repo) — deliberately not built until the baseline
+used by the user's Alfred app) — deliberately not built until the baseline
 pipeline is solid, and to avoid pretending semantic understanding exists.
 
 ## D9. Source files: absolute path + content fingerprint
